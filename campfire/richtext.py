@@ -498,6 +498,9 @@ class AutoLink(HTMLParser):
 
 
 def render_body(body, host=""):
+    from .middleware import request_host
+
+    host = host or request_host.get()
     body = sanitize(body)
 
     def attachment(match):
