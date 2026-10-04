@@ -14,6 +14,38 @@ from django.http import FileResponse, Http404, HttpResponse
 from . import rails
 from .models import Attachment, Blob, Message, RichText, now
 
+# Installed activestorage/lib/active_storage/engine.rb and Blob::Servable.
+BINARY_TYPES = {
+    "text/html",
+    "image/svg+xml",
+    "application/postscript",
+    "application/x-shockwave-flash",
+    "text/xml",
+    "application/xml",
+    "application/xhtml+xml",
+    "application/mathml+xml",
+    "text/cache-manifest",
+}
+INLINE_TYPES = {
+    "image/webp",
+    "image/avif",
+    "image/png",
+    "image/gif",
+    "image/jpeg",
+    "image/tiff",
+    "image/bmp",
+    "image/vnd.adobe.photoshop",
+    "image/vnd.microsoft.icon",
+    "application/pdf",
+}
+
+
+def serving_attributes(content_type, disposition):
+    content_type = (content_type or "application/octet-stream").split(";", 1)[0].lower()
+    if content_type in BINARY_TYPES:
+        return "application/octet-stream", "attachment"
+    return content_type, disposition if content_type in INLINE_TYPES else "attachment"
+
 
 def path_for(key):
     if not key.isalnum() or len(key) < 4:
@@ -77,7 +109,16 @@ def direct_upload(request):
             byte_size=size,
             checksum=data["checksum"],
             content_type=data.get("content_type") or "application/octet-stream",
-            metadata=json.dumps(data.get("metadata") or {}),
+            metadata=json.dumps(
+                {
+                    **(
+                        data.get("metadata")
+                        if isinstance(data.get("metadata"), dict)
+                        else {}
+                    ),
+                    "campfire_upload_user_id": request.current_user.id,
+                }
+            ),
         )
         token = rails.sign(
             {
@@ -128,13 +169,10 @@ def disk(request, token):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(raw)
             return HttpResponse(status=204)
-        return serve(
-            request,
-            path,
-            data.get("content_type") or "application/octet-stream",
-            data.get("filename", "file"),
-            data.get("disposition", "inline"),
+        mime, disposition = serving_attributes(
+            data.get("content_type"), data.get("disposition", "inline")
         )
+        return serve(request, path, mime, data.get("filename", "file"), disposition)
     except (ValueError, KeyError, FileNotFoundError):
         raise Http404
 
@@ -151,6 +189,10 @@ def blob_redirect(request, token, filename):
     attachments = Attachment.objects.filter(blob=blob)
 
     allowed = False
+    if not attachments.exists():
+        # Preserve existing Rails draft signed URLs; native drafts record their uploader.
+        owner = json.loads(blob.metadata or "{}").get("campfire_upload_user_id")
+        allowed = owner is None or owner == request.current_user.id
     for a in attachments:
         if a.record_type == "Message":
             from .models import Message
@@ -174,13 +216,10 @@ def blob_redirect(request, token, filename):
             break
     if not allowed:
         return HttpResponse(status=403)
-    return serve(
-        request,
-        path_for(blob.key),
-        blob.content_type,
-        blob.filename,
-        request.GET.get("disposition", "inline"),
+    mime, disposition = serving_attributes(
+        blob.content_type, request.GET.get("disposition", "inline")
     )
+    return serve(request, path_for(blob.key), mime, blob.filename, disposition)
 
 
 def serve(request, path, content_type, filename, disposition="inline"):

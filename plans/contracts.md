@@ -14,11 +14,11 @@ are not claimed. Raw test and benchmark output remains ignored under `tmp/`.
 | Rich text | Native sanitizer, canonical legacy Trix attachments, signed blobs, retained User mentions after key rotation, opengraph and autolinks;64 independently captured canonical-editor plain-text cases |
 | Profiles, accounts, invitations, roles and bots | Independent browser 12 admin workflows; role grant/revoke, closed membership revocation, actual bot-key rotation and session revocation |
 | Cable | Native Action Cable protocol with shared Redis; independent 10 core browser checks include distinct-user live post/edit/boost/delete; private-stream, forged-signature and signed-out socket 3 security checks |
-| Storage and media | Actual libvips image analysis/thumbnail, ffmpeg video preview/audio metadata, PDF first-page preview, signed two-stage direct uploads, ranges and revoked-room download checks |
+| Storage and media | Actual libvips image analysis/thumbnail, ffmpeg video preview/audio metadata, PDF first-page preview, signed two-stage direct uploads with draft owner/legacy URL access, ranges, forced-binary active-content downloads and revoked-room download checks |
 | Webhooks and push | Native at-least-once leased jobs with fencing/retry/dead state; actual queued local webhook payload and persisted bot reply independently verified; generated replies suppress recursive webhook delivery while retaining push; native pywebpush encryption with DNS-pinned public-provider TLS transport |
 | Deployment | Native schema preparation and version validation, isolated job SQLite queue, atomic snapshots and checked restore; production Uvicorn multiprocess requires shared Redis; TLS at external proxy |
 
-45 native integration and golden test methods include 19 crypto methods covering independent signed IDs,
+46 native integration and golden test methods include 19 crypto methods covering independent signed IDs,
 app verifiers, encrypted/signed cookies, SGIDs,189 CSRF cases and legacy sessions, plus actual
 SQLite workflows/media/rollback/job recovery/backup/restore. No skipped seed-dependent tests.
 

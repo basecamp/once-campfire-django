@@ -313,7 +313,7 @@ def message_data(messages, origin=""):
                 Content=b.content,
             )
         )
-    from .media import representation_url
+    from .media import VARIABLE_TYPES, representation_url
     from .richtext import plain_text, render_body
     from .storage import blob_url
 
@@ -330,7 +330,8 @@ def message_data(messages, origin=""):
             content_type = blob.content_type or ""
             download = url + "?disposition=attachment"
             if (
-                content_type.startswith(("image/", "video/"))
+                content_type in VARIABLE_TYPES
+                or content_type.startswith("video/")
                 or content_type == "application/pdf"
             ):
                 metadata = json.loads(blob.metadata or "{}")

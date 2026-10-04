@@ -531,12 +531,12 @@ def render_body(body, host=""):
             return opengraph_html(attributes, host)
         blob = attached_blob(attributes)
         if blob:
-            from .media import representation_url
+            from .media import VARIABLE_TYPES, representation_url
             from .storage import blob_url
 
             url = blob_url(blob)
             name = html.escape(blob.filename)
-            if (blob.content_type or "").startswith("image/"):
+            if blob.content_type in VARIABLE_TYPES:
                 return (
                     '<figure class="attachment attachment--preview"><a href="'
                     + url

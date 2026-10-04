@@ -15,6 +15,17 @@ from django.db import transaction
 from .models import Attachment, Blob, Variant
 from .storage import path_for, track_file
 
+VARIABLE_TYPES = {
+    "image/png",
+    "image/gif",
+    "image/jpeg",
+    "image/tiff",
+    "image/webp",
+    "image/avif",
+    "image/heic",
+    "image/heif",
+}
+
 _slots = threading.BoundedSemaphore(4)
 
 
@@ -169,7 +180,7 @@ def variant(blob, size, format=None):
 def analyze(blob):
     metadata = {"identified": True, "analyzed": True}
     content_type = blob.content_type or ""
-    if content_type.startswith("image/"):
+    if content_type in VARIABLE_TYPES:
         import pyvips
 
         image = pyvips.Image.new_from_file(
@@ -280,7 +291,7 @@ def preview(blob):
 
 def process_attachment(blob):
     analyze(blob)
-    if (blob.content_type or "").startswith("image/"):
+    if blob.content_type in VARIABLE_TYPES:
         return variant(blob, [1200, 800])
     if (blob.content_type or "").startswith(
         "video/"

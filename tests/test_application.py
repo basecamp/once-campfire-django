@@ -542,6 +542,15 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(
             Client().put(path, data=raw, content_type="text/plain").status_code, 204
         )
+        from campfire.storage import blob_url
+
+        blob = Blob.objects.get(id=data["id"])
+        draft = self.client.get(blob_url(blob))
+        self.assertEqual(draft.status_code, 200)
+        draft.close()
+        other = Client()
+        self.login(other, self.other)
+        self.assertEqual(other.get(blob_url(blob)).status_code, 403)
         self.assertEqual(
             Client().put(path + "bad", data=raw, content_type="text/plain").status_code,
             422,
@@ -818,3 +827,30 @@ class ApplicationTests(unittest.TestCase):
             ]
         self.assertNotIn("webhook", queued)
         self.assertIn("push", queued)
+
+    def test_active_uploaded_content_downloads_as_binary_attachment(self):
+        from campfire.storage import blob_url
+
+        for mime, raw in [
+            ("text/html", b"<script>alert(1)</script>"),
+            (
+                "image/svg+xml",
+                b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+            ),
+        ]:
+            with self.subTest(mime=mime):
+                message = create_message(
+                    self.admin,
+                    self.room,
+                    attachment=SimpleUploadedFile("active.txt", raw, mime),
+                )
+                blob = Attachment.objects.get(
+                    record_type="Message", record_id=message.id
+                ).blob
+                response = self.client.get(blob_url(blob))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response["Content-Type"], "application/octet-stream")
+                self.assertTrue(
+                    response["Content-Disposition"].startswith("attachment;")
+                )
+                response.close()

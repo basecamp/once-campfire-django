@@ -26,12 +26,14 @@ A single process works without Redis. Multiple HTTP workers require `REDIS_URL` 
 Cable publications and rate limits. Jobs use a leased SQLite queue that survives restarts. Put TLS termination in front of the application and configure
 `TRUSTED_PROXIES` to that proxy's address.
 
-45 native integration and Rails golden test methods pass, including real media,
+46 native integration and Rails golden test methods pass, including real media,
 attachment updates and queued bot replies. Run `PATH="$PWD/.venv/bin:$PATH" bin/check`.
 
 ## Known differences
 
 - TLS terminates at a configured proxy.
+- Attached message downloads recheck room membership; native draft uploads belong to their
+  uploader. Existing Rails unattached signed draft URLs remain usable after sign-in.
 - Direct-ping autocomplete explicitly requests JSON, repairing the original fetch-header bug.
 - HTML whitespace, malformed HTML repair, cache validators and native-library media bytes
   can differ; canonical editor plain text and actual browser workflows are tested.
