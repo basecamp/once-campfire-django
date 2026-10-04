@@ -16,6 +16,7 @@ are not claimed. Raw test and benchmark output remains ignored under `tmp/`.
 | Cable | Native Action Cable protocol with shared Redis; independent 10 core browser checks include distinct-user live post/edit/boost/delete; private-stream, forged-signature and signed-out socket 3 security checks |
 | Storage and media | Actual libvips image analysis/thumbnail, ffmpeg video preview/audio metadata, PDF first-page preview, signed two-stage direct uploads with draft owner/legacy URL access, ranges, forced-binary active-content downloads and revoked-room download checks |
 | Webhooks and push | Native at-least-once leased jobs with fencing/retry/dead state; actual queued local webhook payload and persisted bot reply independently verified; generated replies suppress recursive webhook delivery while retaining push; native pywebpush encryption with DNS-pinned public-provider TLS transport |
+| Benchmarks | Independent matched production HTTP runs verify identical ordered message/search windows, successful acknowledged writes, FTS and SQLite integrity. Actual JPEG uploads resize to 1200×675. Two paced runs admit 100 sockets and deliver all 30 messages to every socket; these are measured workloads, not capacity limits. Raw output stays ignored. |
 | Deployment | Native schema preparation and version validation, isolated job SQLite queue, atomic snapshots and checked restore; production Uvicorn multiprocess requires shared Redis; TLS at external proxy |
 
 46 native integration and golden test methods include 19 crypto methods covering independent signed IDs,

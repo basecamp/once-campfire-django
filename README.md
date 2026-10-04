@@ -29,6 +29,23 @@ Cable publications and rate limits. Jobs use a leased SQLite queue that survives
 46 native integration and Rails golden test methods pass, including real media,
 attachment updates and queued bot replies. Run `PATH="$PWD/.venv/bin:$PATH" bin/check`.
 
+## Benchmarks
+
+Measured with 16 concurrent clients on an AMD Ryzen AI MAX+ 395,
+with four hardware threads allocated to each app.
+
+| Requests/second | Ruby | Django | Laravel |
+|---|---:|---:|---:|
+| Room | 242 | 170 | 164 |
+| Messages | 402 | 196 | 175 |
+| Sidebar | 541 | 615 | 715 |
+| Search | 424 | 315 | 305 |
+| Post message | 225 | 154 | 137 |
+
+At 100 WebSocket connections and five messages/second, median delivery to every
+connection was 24 ms for Ruby, 70 ms for Django and 42 ms for Laravel. Every message
+reached every connection in both runs.
+
 ## Known differences
 
 - TLS terminates at a configured proxy.
