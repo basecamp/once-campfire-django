@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+cd /rails
+python manage.py restore
+python manage.py prepare

@@ -1,0 +1,13 @@
+Django==6.1.1
+uvicorn[standard]==0.35.0
+Jinja2==3.1.6
+cryptography==46.0.7
+bcrypt==4.3.0
+nh3==0.3.7
+Pillow==11.3.0
+httpx==0.28.1
+pywebpush==2.3.0
+qrcode==8.2
+redis==6.4.0
+
+pyvips==3.0.0

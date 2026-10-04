@@ -1,0 +1,327 @@
+{
+  "generated_by": "reference-tools/richtext/generate.rb",
+  "source": "https://github.com/basecamp/once-campfire-elixir/blob/main/vectors/richtext-corpus.json",
+  "contract": "ActionText plain text for canonical editor content; malformed HTML repair is not byte parity.",
+  "cases": [
+    {
+      "name": "fixture first",
+      "body": "First post!",
+      "plain_text": "First post!"
+    },
+    {
+      "name": "fixture third",
+      "body": "Third time's a charm.",
+      "plain_text": "Third time's a charm."
+    },
+    {
+      "name": "fixture fourth",
+      "body": "You know what the fellow said – in Italy, for thirty years under the Borgias, they had warfare, terror, murder and bloodshed, but they produced Michelangelo, Leonardo da Vinci and the Renaissance. In Switzerland, they had brotherly love, they had five hundred years of democracy and peace – and what did that produce? The cuckoo clock.",
+      "plain_text": "You know what the fellow said – in Italy, for thirty years under the Borgias, they had warfare, terror, murder and bloodshed, but they produced Michelangelo, Leonardo da Vinci and the Renaissance. In Switzerland, they had brotherly love, they had five hundred years of democracy and peace – and what did that produce? The cuckoo clock."
+    },
+    {
+      "name": "fixture sixth",
+      "body": "The sense of unhappiness is so much easier to convey than that of happiness. In misery we seem aware of our own existence, even though it may be in the form of a monstrous egotism—this pain of mine is individual, this nerve that winces belongs to me and to no other. But happiness annihilates us—we lose our identity.",
+      "plain_text": "The sense of unhappiness is so much easier to convey than that of happiness. In misery we seem aware of our own existence, even though it may be in the form of a monstrous egotism—this pain of mine is individual, this nerve that winces belongs to me and to no other. But happiness annihilates us—we lose our identity."
+    },
+    {
+      "name": "fixture tenth",
+      "body": "I don't care a damn about men who are loyal to the people who pay them, to organizations...I don't think even my country means all that much. There are many countries in our blood, aren't there, but only one person. Would the world be in the mess it is if we were loyal to love and not to countries?",
+      "plain_text": "I don't care a damn about men who are loyal to the people who pay them, to organizations...I don't think even my country means all that much. There are many countries in our blood, aren't there, but only one person. Would the world be in the mess it is if we were loyal to love and not to countries?"
+    },
+    {
+      "name": "lexxy paragraph",
+      "body": "<p>Hello world</p>",
+      "plain_text": "Hello world"
+    },
+    {
+      "name": "lexxy paragraphs",
+      "body": "<p>First</p><p>Second</p><p><br></p><p>Fourth</p>",
+      "plain_text": "First\n\nSecond\n\n\n\nFourth"
+    },
+    {
+      "name": "lexxy bold italic",
+      "body": "<p>Hello <b><strong class=\"lexxy-content__bold\" style=\"white-space: pre-wrap;\">bold</strong></b> and <i><em class=\"lexxy-content__italic\">italic</em></i></p>",
+      "plain_text": "Hello bold and italic"
+    },
+    {
+      "name": "lexxy strong em",
+      "body": "<p>Hello <strong>bold</strong> <em>it</em></p>",
+      "plain_text": "Hello bold it"
+    },
+    {
+      "name": "lexxy strikethrough underline mark",
+      "body": "<p>Hello <s>struck</s> <u>under</u> <mark>marked</mark></p><pre data-language=\"ruby\">def x<br>end</pre>",
+      "plain_text": "Hello struck under marked\n\ndef x\nend"
+    },
+    {
+      "name": "lexxy highlight with style",
+      "body": "<p><mark style=\"color: var(--highlight-1); background-color: var(--highlight-bg-2);\">colored</mark> <span style=\"color: red; background-image: url(javascript:alert(1))\">red</span></p>",
+      "plain_text": "colored red"
+    },
+    {
+      "name": "lexxy highlight class",
+      "body": "<p><mark class=\"lexxy-content__highlight\" style=\"background-color: rgb(255, 240, 0)\">hi</mark></p>",
+      "plain_text": "hi"
+    },
+    {
+      "name": "lexxy inline code",
+      "body": "<p>Run <code>bin/rails db:migrate</code> now</p>",
+      "plain_text": "Run bin/rails db:migrate now"
+    },
+    {
+      "name": "lexxy code block",
+      "body": "<pre data-language=\"javascript\">const a = 1;<br>if (a &lt; 2) { console.log(\"&amp;\") }</pre>",
+      "plain_text": "const a = 1;\nif (a < 2) { console.log(\"&\") }"
+    },
+    {
+      "name": "lexxy code block plain",
+      "body": "<pre data-language=\"plain\" data-highlight-language=\"plain\">line 1\n  line 2</pre>",
+      "plain_text": "line 1\n  line 2"
+    },
+    {
+      "name": "lexxy heading",
+      "body": "<h1>Heading</h1><h2>Sub</h2><h3>Third</h3><p>Body</p>",
+      "plain_text": "Heading\n\nSubThirdBody"
+    },
+    {
+      "name": "lexxy blockquote",
+      "body": "<blockquote>Quoted text</blockquote><p>After</p>",
+      "plain_text": "“Quoted text”\n\nAfter"
+    },
+    {
+      "name": "lexxy empty blockquote",
+      "body": "<blockquote><br></blockquote>",
+      "plain_text": "“”"
+    },
+    {
+      "name": "lexxy bullet list",
+      "body": "<ul><li>One</li><li>Two</li><li>Three</li></ul>",
+      "plain_text": "• One\n• Two\n• Three"
+    },
+    {
+      "name": "lexxy numbered list",
+      "body": "<ol><li>First</li><li>Second</li></ol>",
+      "plain_text": "1. First\n2. Second"
+    },
+    {
+      "name": "lexxy nested list",
+      "body": "<ul><li>One<ul><li>Nested a</li><li>Nested b<ol><li>Deep</li></ol></li></ul></li><li>Two</li></ul>",
+      "plain_text": "• One\n  • Nested a\n  • Nested b\n    1. Deep\n• Two"
+    },
+    {
+      "name": "lexxy list with value",
+      "body": "<ol start=\"3\"><li value=\"3\">Three</li><li value=\"4\">Four</li></ol>",
+      "plain_text": "1. Three\n2. Four"
+    },
+    {
+      "name": "lexxy link",
+      "body": "<p>See <a href=\"https://example.com/page?a=1&amp;b=2\">the page</a>.</p>",
+      "plain_text": "See the page."
+    },
+    {
+      "name": "lexxy link with target",
+      "body": "<p><a href=\"https://example.com\" target=\"_blank\" rel=\"noopener\">x</a></p>",
+      "plain_text": "x"
+    },
+    {
+      "name": "lexxy hr",
+      "body": "<p>Above</p><hr><p>Below</p>",
+      "plain_text": "Above\n\nBelow"
+    },
+    {
+      "name": "lexxy table",
+      "body": "<figure class=\"lexxy-content__table-wrapper\"><table><tbody><tr><th><p>Name</p></th></tr><tr><td><p>Jason</p></td></tr></tbody></table></figure>",
+      "plain_text": "Name\n\nJason"
+    },
+    {
+      "name": "lexxy table with colgroup and thead",
+      "body": "<figure class=\"lexxy-content__table-wrapper\"><table><colgroup><col><col></colgroup><thead><tr><th class=\"lexxy-content__table-cell--header\">A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody><tfoot><tr><td>f</td><td>g</td></tr></tfoot></table></figure>",
+      "plain_text": "AB12fg"
+    },
+    {
+      "name": "lexxy line breaks",
+      "body": "<p>one<br>two<br><br>three</p>",
+      "plain_text": "one\ntwo\n\nthree"
+    },
+    {
+      "name": "trix formatting",
+      "body": "<div>Hello <strong>bold</strong> <em>it</em> <del>gone</del> <a href=\"https://example.com/\">link</a><br>second line</div><h1>Heading</h1><blockquote>quoted</blockquote><pre>line 1\nline 2</pre><ul><li>one</li></ul><ol><li>first</li></ol>",
+      "plain_text": "Hello bold it gone link\nsecond line\nHeading\n\n“quoted”\n\nline 1\nline 2• one\n\n1. first"
+    },
+    {
+      "name": "unicode rtl",
+      "body": "<p>שלום עולם مرحبا</p>",
+      "plain_text": "שלום עולם مرحبا"
+    },
+    {
+      "name": "unicode zero width",
+      "body": "<p>zero​width‍joiner﻿bom</p>",
+      "plain_text": "zero​width‍joiner﻿bom"
+    },
+    {
+      "name": "unicode combining",
+      "body": "<p>e&#x301; ñ Å</p>",
+      "plain_text": "é ñ Å"
+    },
+    {
+      "name": "unicode nbsp",
+      "body": "<p>a&nbsp;b c  d</p>",
+      "plain_text": "a b c  d"
+    },
+    {
+      "name": "unicode emoji zwj",
+      "body": "<p>👩‍👩‍👧‍👦 🏳️‍🌈 👍🏽</p>",
+      "plain_text": "👩‍👩‍👧‍👦 🏳️‍🌈 👍🏽"
+    },
+    {
+      "name": "unicode emoji only html",
+      "body": "<p>🔥💯</p>",
+      "plain_text": "🔥💯"
+    },
+    {
+      "name": "unicode crlf",
+      "body": "<p>line1\r\nline2\rline3</p>\r\n<p>x</p>",
+      "plain_text": "line1\nline2\nline3\n\nx"
+    },
+    {
+      "name": "unicode control chars",
+      "body": "<p>bell\u0007 esc\u001b del c1</p>",
+      "plain_text": "bell\u0007 esc\u001b del c1"
+    },
+    {
+      "name": "unicode nul",
+      "body": "<p>a\u0000b&#0;c</p>",
+      "plain_text": "ab�c"
+    },
+    {
+      "name": "unicode line separators",
+      "body": "<p>a b c http://example.com/ x</p>",
+      "plain_text": "a b c http://example.com/ x"
+    },
+    {
+      "name": "unicode astral",
+      "body": "<p>𝕳𝖊𝖑𝖑𝖔 𠜎𠜱 &#x1F600; &#128512;</p>",
+      "plain_text": "𝕳𝖊𝖑𝖑𝖔 𠜎𠜱 😀 😀"
+    },
+    {
+      "name": "unicode invalid char refs",
+      "body": "<p>&#xD800; &#x110000; &#128; &#x0; &amp;amp; &notin; &notit; &ampx</p>",
+      "plain_text": "� � € � &amp; ∉ ¬it; &x"
+    },
+    {
+      "name": "unicode in urls",
+      "body": "<p>https://例え.jp/パス and http://example.com/ünïcode</p>",
+      "plain_text": "https://例え.jp/パス and http://example.com/ünïcode"
+    },
+    {
+      "name": "unicode idn link",
+      "body": "<a href=\"https://xn--80aswg.xn--p1ai/page\">рф</a>",
+      "plain_text": "рф"
+    },
+    {
+      "name": "unicode leading whitespace body",
+      "body": "\n\n  <p>trimmed</p>  \n",
+      "plain_text": "trimmed"
+    },
+    {
+      "name": "autolink plain url",
+      "body": "Visit https://example.com/path today",
+      "plain_text": "Visit https://example.com/path today"
+    },
+    {
+      "name": "autolink www",
+      "body": "see www.example.com and www.a",
+      "plain_text": "see www.example.com and www.a"
+    },
+    {
+      "name": "autolink trailing punctuation",
+      "body": "Go to https://example.com/page. Or (https://example.com/wiki_(foo)), or https://example.com/x!?",
+      "plain_text": "Go to https://example.com/page. Or (https://example.com/wiki_(foo)), or https://example.com/x!?"
+    },
+    {
+      "name": "autolink brackets",
+      "body": "[https://example.com/a] {https://example.com/b} (https://example.com/c)",
+      "plain_text": "[https://example.com/a] {https://example.com/b} (https://example.com/c)"
+    },
+    {
+      "name": "autolink apostrophe",
+      "body": "it's at https://example.com/it's' ok",
+      "plain_text": "it's at https://example.com/it's' ok"
+    },
+    {
+      "name": "autolink ampersands",
+      "body": "https://example.com/?a=1&b=2&c=3;",
+      "plain_text": "https://example.com/?a=1&b=2&c=3;"
+    },
+    {
+      "name": "autolink trailing gt",
+      "body": "<p>https://example.com/&gt;</p>",
+      "plain_text": "https://example.com/>"
+    },
+    {
+      "name": "autolink trailing lt",
+      "body": "<p>https://example.com/&lt;b</p>",
+      "plain_text": "https://example.com/<b"
+    },
+    {
+      "name": "autolink existing link",
+      "body": "<p><a href=\"https://example.com\">https://example.com</a> and https://other.com</p>",
+      "plain_text": "https://example.com and https://other.com"
+    },
+    {
+      "name": "autolink existing link multiline",
+      "body": "<p><a href=\"https://example.com\">first\nhttps://inside.com</a> https://outside.com</p>",
+      "plain_text": "first\nhttps://inside.com https://outside.com"
+    },
+    {
+      "name": "autolink schemes",
+      "body": "ftp://files.example.com/x irc://irc.example.com mailto://x file:///etc/passwd ssh://host javascript://comment%0Aalert(1)",
+      "plain_text": "ftp://files.example.com/x irc://irc.example.com mailto://x file:///etc/passwd ssh://host javascript://comment%0Aalert(1)"
+    },
+    {
+      "name": "autolink uppercase scheme",
+      "body": "HTTPS://EXAMPLE.COM/UP WWW.EXAMPLE.COM",
+      "plain_text": "HTTPS://EXAMPLE.COM/UP WWW.EXAMPLE.COM"
+    },
+    {
+      "name": "autolink email",
+      "body": "mail me at david@example.com or o'neil+tag@sub.example.co.uk.",
+      "plain_text": "mail me at david@example.com or o'neil+tag@sub.example.co.uk."
+    },
+    {
+      "name": "autolink email in link",
+      "body": "<a href=\"mailto:x@example.com\">x@example.com</a> y@example.com",
+      "plain_text": "x@example.com y@example.com"
+    },
+    {
+      "name": "autolink email and url",
+      "body": "https://user@example.com/path and me@example.com",
+      "plain_text": "https://user@example.com/path and me@example.com"
+    },
+    {
+      "name": "autolink email weird",
+      "body": "a.@b.com .x@y.co -a@b-c.d _@_._ x@y",
+      "plain_text": "a.@b.com .x@y.co -a@b-c.d _@_._ x@y"
+    },
+    {
+      "name": "autolink url in code",
+      "body": "<pre>https://example.com/in-pre</pre><code>https://example.com/in-code</code>",
+      "plain_text": "https://example.com/in-prehttps://example.com/in-code"
+    },
+    {
+      "name": "autolink url with quotes",
+      "body": "<p>https://example.com/\"quoted\" and https://example.com/'single'</p>",
+      "plain_text": "https://example.com/\"quoted\" and https://example.com/'single'"
+    },
+    {
+      "name": "autolink url with entity",
+      "body": "<p>https://example.com/?q=a&amp;b=%20c</p>",
+      "plain_text": "https://example.com/?q=a&b=%20c"
+    },
+    {
+      "name": "autolink nbsp separated",
+      "body": "<p>https://example.com/a next</p>",
+      "plain_text": "https://example.com/a next"
+    }
+  ]
+}

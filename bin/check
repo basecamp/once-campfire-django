@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+python -m compileall -q campfire tests
+python -m unittest tests.test_application tests.test_rails

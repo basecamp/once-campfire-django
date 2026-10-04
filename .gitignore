@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.py[cod]
+tmp/
+storage/
+assets/generated/
+.env
