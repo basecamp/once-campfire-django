@@ -26,7 +26,8 @@ A single process works without Redis. Multiple HTTP workers require `REDIS_URL` 
 Cable publications and rate limits. Jobs use a leased SQLite queue that survives restarts. Put TLS termination in front of the application and configure
 `TRUSTED_PROXIES` to that proxy's address.
 
-Run `PATH="$PWD/.venv/bin:$PATH" bin/check` for native integration and Rails golden tests.
+45 native integration and Rails golden test methods pass, including real media,
+attachment updates and queued bot replies. Run `PATH="$PWD/.venv/bin:$PATH" bin/check`.
 
 ## Known differences
 

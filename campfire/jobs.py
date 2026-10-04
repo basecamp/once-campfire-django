@@ -207,12 +207,15 @@ def perform(kind, data):
             response = httpx.post(webhook.url, json=payload, timeout=7)
         except httpx.TimeoutException:
             create_message(
-                webhook.user, message.room, "Failed to respond within 7 seconds"
+                webhook.user,
+                message.room,
+                "Failed to respond within 7 seconds",
+                webhooks=False,
             )
             return
         content_type = response.headers.get("content-type", "").split(";")[0]
         if response.status_code == 200 and content_type in ("text/plain", "text/html"):
-            create_message(webhook.user, message.room, response.text)
+            create_message(webhook.user, message.room, response.text, webhooks=False)
         elif content_type and response.content:
             import mimetypes
 
@@ -223,7 +226,9 @@ def perform(kind, data):
                 response.content,
                 content_type,
             )
-            create_message(webhook.user, message.room, attachment=upload)
+            create_message(
+                webhook.user, message.room, attachment=upload, webhooks=False
+            )
     elif kind == "push":
         private = os.environ.get("VAPID_PRIVATE_KEY")
         if not private:

@@ -74,7 +74,9 @@ def index_message(message, body, attachment=None):
         )
 
 
-def create_message(user, room, body="", client_id=None, attachment=None):
+def create_message(
+    user, room, body="", client_id=None, attachment=None, *, webhooks=True
+):
     from .storage import attach_signed, store_upload
 
     with staged_files(), transaction.atomic():
@@ -108,29 +110,50 @@ def create_message(user, room, body="", client_id=None, attachment=None):
             | Q(connected_at__lt=now() - timedelta(seconds=60))
         ).update(unread_at=message.created_at, updated_at=now())
         transaction.on_commit(lambda: publish_message(message, "append"))
-        transaction.on_commit(lambda: enqueue_notifications(message, rich.body))
+        transaction.on_commit(
+            lambda: enqueue_notifications(message, rich.body, webhooks=webhooks)
+        )
         return message
 
 
-def update_message(message, body):
-    with transaction.atomic():
-        body = sanitize(body)
-        rich, _ = RichText.objects.update_or_create(
-            record_type="Message",
-            record_id=message.id,
-            name="body",
-            defaults={"body": body},
-        )
-        reconcile_embeds(rich)
+def update_message(message, body=None, attachment=None):
+    from .storage import attach_signed, remove_attachment, store_upload
+
+    with staged_files(), transaction.atomic():
+        rich = RichText.objects.filter(
+            record_type="Message", record_id=message.id, name="body"
+        ).first()
+        if body is not None:
+            body = sanitize(body)
+            rich, _ = RichText.objects.update_or_create(
+                record_type="Message",
+                record_id=message.id,
+                name="body",
+                defaults={"body": body},
+            )
+            reconcile_embeds(rich)
+        else:
+            body = rich.body if rich else ""
+        if attachment is not None:
+            remove_attachment("Message", message.id, "attachment")
+            if attachment:
+                blob = (
+                    store_upload(attachment, "Message", message.id, "attachment")
+                    if hasattr(attachment, "read")
+                    else attach_signed(attachment, "Message", message.id, "attachment")
+                )
+                from .media import process_attachment
+
+                process_attachment(blob)
         message.save()
-        blob = (
+        current = (
             Attachment.objects.filter(
                 record_type="Message", record_id=message.id, name="attachment"
             )
             .select_related("blob")
             .first()
         )
-        index_message(message, body, blob.blob if blob else None)
+        index_message(message, body, current.blob if current else None)
         Room.objects.filter(id=message.room_id).update(updated_at=now())
         transaction.on_commit(lambda: publish_message(message, "replace"))
 
@@ -187,7 +210,7 @@ def publish_message(message, action):
             publish(f"user_{user_id}_unreads", {"roomId": message.room_id})
 
 
-def enqueue_notifications(message, body):
+def enqueue_notifications(message, body, *, webhooks=True):
     from .jobs import enqueue
 
     mentions = mention_ids(body)
@@ -198,8 +221,9 @@ def enqueue_notifications(message, body):
     )
     if message.room.type != "Rooms::Direct":
         bot_ids = [id for id in bot_ids if id in mentions]
-    for webhook in Webhook.objects.filter(user_id__in=bot_ids):
-        enqueue("webhook", {"webhook_id": webhook.id, "message_id": message.id})
+    if webhooks:
+        for webhook in Webhook.objects.filter(user_id__in=bot_ids):
+            enqueue("webhook", {"webhook_id": webhook.id, "message_id": message.id})
     for membership in (
         Membership.objects.filter(room=message.room, user__status=0)
         .exclude(user=message.creator)

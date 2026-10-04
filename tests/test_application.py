@@ -27,6 +27,7 @@ from campfire.domain import (
     create_message,
     create_user,
     grant_memberships,
+    update_message,
 )
 from campfire.models import (
     Account,
@@ -38,6 +39,7 @@ from campfire.models import (
     RichText,
     Room,
     User,
+    Webhook,
     now,
 )
 
@@ -688,3 +690,131 @@ class ApplicationTests(unittest.TestCase):
         for case in vectors["cases"]:
             with self.subTest(case=case["name"]):
                 self.assertEqual(plain_text(case["body"]), case["plain_text"])
+
+    def test_attachment_updates_preserve_body_index_and_rollback(self):
+        from django.test.client import BOUNDARY, MULTIPART_CONTENT, encode_multipart
+
+        from campfire.storage import path_for
+
+        def image(filename):
+            raw = io.BytesIO()
+            Image.new("RGB", (30, 20), "red").save(raw, "PNG")
+            return SimpleUploadedFile(filename, raw.getvalue(), "image/png")
+
+        message = create_message(
+            self.admin, self.room, "retained body", attachment=image("old.png")
+        )
+        old = Attachment.objects.get(record_type="Message", record_id=message.id).blob
+        path = f"/rooms/{self.room.id}/messages/{message.id}"
+        response = self.client.patch(
+            path,
+            data=encode_multipart(BOUNDARY, {"message[attachment]": image("new.png")}),
+            content_type=MULTIPART_CONTENT,
+            HTTP_X_CSRF_TOKEN=self.token,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            RichText.objects.get(record_id=message.id, record_type="Message").body,
+            "retained body",
+        )
+        new = Attachment.objects.get(record_type="Message", record_id=message.id).blob
+        self.assertNotEqual(old.id, new.id)
+        self.assertTrue(path_for(old.key).exists())
+        self.assertIn(
+            f'data-message-id="{message.id}"'.encode(),
+            self.client.get("/searches?q=retained").content,
+        )
+        before = set(self.files.rglob("*"))
+        with patch(
+            "campfire.media.process_attachment",
+            side_effect=RuntimeError("analysis failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                update_message(message, attachment=image("failure.png"))
+        self.assertEqual(
+            Attachment.objects.get(record_type="Message", record_id=message.id).blob_id,
+            new.id,
+        )
+        self.assertEqual(
+            {p for p in self.files.rglob("*") if p.is_file()},
+            {p for p in before if p.is_file()},
+        )
+        response = self.post(
+            path,
+            {
+                "message[body]": "",
+                "message[attachment]": rails.signed_id(
+                    "ActiveStorage::Blob", old.id, "blob_id"
+                ),
+            },
+            "patch",
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(b"old.png", self.client.get("/searches?q=old").content)
+        self.assertEqual(
+            Attachment.objects.get(record_type="Message", record_id=message.id).blob_id,
+            old.id,
+        )
+
+        response = self.post(path, {"message[attachment]": ""}, "patch")
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(
+            Attachment.objects.filter(
+                record_type="Message", record_id=message.id
+            ).exists()
+        )
+
+    def test_bot_multipart_update_preserves_omitted_body(self):
+        from django.test.client import BOUNDARY, MULTIPART_CONTENT, encode_multipart
+
+        bot = create_user(name="Bot", role=2, bot_token="token")
+        grant_memberships(self.room, [bot])
+        message = create_message(bot, self.room, "bot body")
+        response = Client().patch(
+            f"/rooms/{self.room.id}/{bot.id}-token/messages/{message.id}",
+            data=encode_multipart(
+                BOUNDARY,
+                {"attachment": SimpleUploadedFile("new.txt", b"file", "text/plain")},
+            ),
+            content_type=MULTIPART_CONTENT,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            RichText.objects.get(record_id=message.id, record_type="Message").body,
+            "bot body",
+        )
+        self.assertEqual(
+            Attachment.objects.get(
+                record_type="Message", record_id=message.id
+            ).blob.filename,
+            "new.txt",
+        )
+
+    def test_webhook_reply_does_not_start_another_bot_webhook(self):
+        import httpx
+
+        one = create_user(name="First bot", role=2, bot_token="one")
+        two = create_user(name="Second bot", role=2, bot_token="two")
+        room = Room.objects.create(type="Rooms::Direct", creator=self.admin)
+        grant_memberships(room, [self.admin, one, two])
+        Membership.objects.filter(room=room, user=self.admin).update(
+            involvement="everything"
+        )
+        first = Webhook.objects.create(user=one, url="http://localhost/one")
+        Webhook.objects.create(user=two, url="http://localhost/two")
+        message = create_message(self.admin, room, "hello")
+        with jobs.connect() as db:
+            db.execute("DELETE FROM jobs")
+        response = httpx.Response(
+            200, headers={"content-type": "text/plain"}, text="bot reply"
+        )
+        with patch("httpx.post", return_value=response):
+            jobs.perform("webhook", {"webhook_id": first.id, "message_id": message.id})
+        self.assertEqual(Message.objects.filter(room=room).count(), 2)
+        with jobs.connect() as db:
+            queued = [
+                json.loads(row[0])["kind"]
+                for row in db.execute("SELECT payload FROM jobs")
+            ]
+        self.assertNotIn("webhook", queued)
+        self.assertIn("push", queued)

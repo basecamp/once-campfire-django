@@ -28,6 +28,7 @@ from .models import (
     Account,
     Attachment,
     Ban,
+    Blob,
     Boost,
     Membership,
     Message,
@@ -73,6 +74,14 @@ def value(request, group, name, default=""):
         if isinstance(data.get(group), dict)
         else data.get(f"{group}[{name}]", default)
     )
+
+
+def message_attachment(request):
+    for key in ("message[attachment]", "attachment"):
+        if key in request.FILES:
+            return request.FILES[key]
+    attachment = value(request, "message", "attachment", None)
+    return params(request).get("attachment") if attachment is None else attachment
 
 
 def login_required(view):
@@ -412,11 +421,7 @@ def messages(request, room_id=None, id=None, edit=False, bot_key=None):
         )
         if bot_key and request.FILES.get("attachment"):
             body = ""
-        attachment = (
-            request.FILES.get("message[attachment]")
-            or request.FILES.get("attachment")
-            or value(request, "message", "attachment")
-        )
+        attachment = message_attachment(request)
         if bot_key and not body and not attachment:
             return HttpResponse(status=422)
         try:
@@ -444,12 +449,18 @@ def messages(request, room_id=None, id=None, edit=False, bot_key=None):
             content_type="text/vnd.turbo-stream.html",
         )
     if request.method in ("PATCH", "PUT"):
-        update_message(
-            m,
-            request.body.decode(errors="replace")
+        attachment = message_attachment(request)
+        body = (
+            None
+            if bot_key and attachment is not None
+            else request.body.decode(errors="replace")
             if bot_key
-            else value(request, "message", "body"),
+            else value(request, "message", "body", None)
         )
+        try:
+            update_message(m, body, attachment)
+        except (ValueError, Blob.DoesNotExist):
+            return HttpResponse(status=422)
         return (
             JsonResponse(serialize_message(m, request))
             if wants_json

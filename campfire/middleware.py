@@ -1,5 +1,6 @@
 import secrets
 from datetime import timedelta
+from io import BytesIO
 
 from django.http import HttpResponse
 
@@ -134,6 +135,18 @@ class SecurityMiddleware:
     def __call__(self, request):
         if Ban.objects.filter(ip_address=request.META.get("REMOTE_ADDR", "")).exists():
             return HttpResponse(status=403)
+        if (
+            request.method in ("PATCH", "PUT")
+            and request.content_type == "multipart/form-data"
+        ):
+            from django.http.multipartparser import MultiPartParser
+
+            request._post, request._files = MultiPartParser(
+                request.META,
+                BytesIO(request.body),
+                request.upload_handlers,
+                request.encoding,
+            ).parse()
         if (
             not request.path.startswith(("/assets/", "/rails/active_storage/"))
             and request.path.endswith((".json", ".turbo_stream"))
