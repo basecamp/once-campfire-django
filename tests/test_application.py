@@ -27,6 +27,7 @@ from campfire import jobs, rails
 from campfire.domain import (
     create_message,
     create_user,
+    publish_message,
     grant_memberships,
     search_message_ids,
     update_message,
@@ -93,6 +94,15 @@ class ApplicationTests(unittest.TestCase):
         grant_memberships(self.private, [self.admin])
         self.client = Client()
         self.token = self.login(self.client, self.admin)
+
+    def test_live_message_append_uses_messages_controller_scrolling(self):
+        message = create_message(self.admin, self.room, "live scroll regression")
+        with patch("campfire.cable.publish") as publish:
+            publish_message(message, "append")
+        rendered = publish.call_args_list[0].args[1]
+        self.assertIn('action="append"', rendered)
+        self.assertIn("live scroll regression", rendered)
+        self.assertNotIn("maintain_scroll", rendered)
 
     def restore_connection(self):
         connection.close()

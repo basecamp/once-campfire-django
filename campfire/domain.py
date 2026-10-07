@@ -234,7 +234,7 @@ def publish_message(message, action):
             if action == "append"
             else "message_" + message.client_message_id
         )
-    content = f'<turbo-stream action="{action}" target="{target}" maintain_scroll="true"><template>{fragment}</template></turbo-stream>'
+    content = f'<turbo-stream action="{action}" target="{target}"><template>{fragment}</template></turbo-stream>'
     publish(rails.stream(message.room), content)
     if action == "append":
         for user_id in Membership.objects.filter(room_id=message.room_id).values_list(
