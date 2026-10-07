@@ -8,6 +8,8 @@ from urllib.parse import urlencode
 
 import bcrypt
 from django.db import IntegrityError, connection, transaction
+from django.db.models import Count, Q
+from django.db.models.expressions import RawSQL
 from django.db.models.functions import Lower
 from django.http import Http404, HttpResponse, HttpResponseRedirect, JsonResponse
 from markupsafe import Markup
@@ -21,6 +23,7 @@ from .domain import (
     get_room,
     grant_memberships,
     presentation_messages,
+    search_message_ids,
     update_message,
     user_rooms,
 )
@@ -517,16 +520,14 @@ def searches(request):
         return HttpResponseRedirect("/searches?" + urlencode({"q": query}))
     rows = []
     if query:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT m.id FROM messages m JOIN message_search_index idx ON idx.rowid=m.id JOIN memberships ms ON ms.room_id=m.room_id WHERE ms.user_id=%s AND idx.body MATCH %s ORDER BY m.created_at DESC LIMIT 100",
-                [request.current_user.id, query],
-            )
-            ids = [r[0] for r in cursor.fetchall()]
+        ids = search_message_ids(request.current_user, query)
         rows = list(
-            presentation_messages(Message.objects.filter(id__in=ids)).order_by(
-                "created_at"
-            )
+            presentation_messages(
+                Message.objects.filter(
+                    id__in=ids,
+                    room__memberships__user=request.current_user,
+                )
+            ).order_by("id")
         )
     return page(
         request,
@@ -563,7 +564,7 @@ def refresh(request, room_id):
             Message.objects.filter(room=obj, updated_at__gt=loaded).exclude(
                 id__in=[m.id for m in new_rows]
             )
-        ).order_by("-created_at")[:40]
+        ).order_by(RawSQL("+messages.created_at", []).desc())[:40]
     )
     rows = new_rows + list(reversed(updated_rows))
     streams = []
@@ -674,11 +675,20 @@ def room_form(request, kind, id=None, edit=False, new=False):
         users = list(User.objects.filter(id__in=ids))
         ids = {u.id for u in users}
         with staged_files(), transaction.atomic():
-            for candidate in Room.objects.filter(
-                type="Rooms::Direct", memberships__user=request.current_user
-            ):
-                if set(candidate.memberships.values_list("user_id", flat=True)) == ids:
-                    return HttpResponseRedirect(f"/rooms/{candidate.id}")
+            candidate = (
+                Room.objects.filter(type="Rooms::Direct")
+                .annotate(
+                    member_count=Count("memberships"),
+                    selected_count=Count(
+                        "memberships", filter=Q(memberships__user_id__in=ids)
+                    ),
+                )
+                .filter(member_count=len(ids), selected_count=len(ids))
+                .order_by("id")
+                .first()
+            )
+            if candidate:
+                return HttpResponseRedirect(f"/rooms/{candidate.id}")
             obj = Room.objects.create(
                 type=type_name, name=None, creator=request.current_user
             )

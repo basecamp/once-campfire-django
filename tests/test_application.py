@@ -13,6 +13,7 @@ import re
 import sqlite3
 import tempfile
 import unittest
+from datetime import timedelta
 from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
@@ -27,6 +28,7 @@ from campfire.domain import (
     create_message,
     create_user,
     grant_memberships,
+    search_message_ids,
     update_message,
 )
 from campfire.models import (
@@ -122,6 +124,47 @@ class ApplicationTests(unittest.TestCase):
     def message(self, user=None, room=None, body="Coffee <strong>is good</strong>"):
         return create_message(user or self.admin, room or self.room, body)
 
+    def test_search_reaches_sparse_membership_and_orders_newest_ids(self):
+        visible = self.message(user=self.member, body="sparseneedle")
+        messages = Message.objects.bulk_create(
+            [
+                Message(
+                    room=self.private,
+                    creator=self.admin,
+                    client_message_id=f"hidden-{i}",
+                )
+                for i in range(1100)
+            ]
+        )
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                "INSERT INTO message_search_index(rowid,body) VALUES (%s,%s)",
+                [(message.id, "sparseneedle") for message in messages],
+            )
+        self.assertEqual(search_message_ids(self.member, "sparseneedle"), [visible.id])
+        Membership.objects.filter(user=self.member, room=self.room).delete()
+        self.assertEqual(search_message_ids(self.member, "sparseneedle"), [])
+        Membership.objects.create(user=self.member, room=self.private)
+        newest = [message.id for message in messages[-100:]][::-1]
+        # Creation timestamps may be imported or backdated; IDs define the page.
+        Message.objects.filter(id=messages[-1].id).update(
+            created_at=messages[0].created_at - timedelta(days=1)
+        )
+        self.assertEqual(search_message_ids(self.member, "sparseneedle"), newest)
+        self.assertEqual(search_message_ids(self.member, "sparseneedle AND"), [])
+
+    def test_direct_lookup_requires_the_exact_member_set(self):
+        larger = Room.objects.create(type="Rooms::Direct", creator=self.admin)
+        grant_memberships(larger, [self.admin, self.member, self.other])
+        exact = Room.objects.create(type="Rooms::Direct", creator=self.admin)
+        grant_memberships(exact, [self.admin, self.member])
+        response = self.post(
+            "/rooms/directs", {"user_ids[]": [self.member.id, self.member.id]}
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"/rooms/{exact.id}")
+        self.assertEqual(Room.objects.filter(type="Rooms::Direct").count(), 2)
+
     def test_populated_room_history_sidebar_search_are_real_pages(self):
         message = self.message()
         for path in [
@@ -137,7 +180,9 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn(b"All Talk", sidebar)
         self.assertIn(b"<!DOCTYPE html>", sidebar)
         self.assertIn(b"</html>", sidebar)
-        self.assertIn(f'name="current-user-id" content="{self.admin.id}"'.encode(), sidebar)
+        self.assertIn(
+            f'name="current-user-id" content="{self.admin.id}"'.encode(), sidebar
+        )
 
     def test_writes_update_fts_touch_room_and_mark_only_disconnected_members_unread(
         self,

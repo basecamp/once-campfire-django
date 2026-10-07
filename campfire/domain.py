@@ -30,6 +30,39 @@ def get_room(user, id):
     return user_rooms(user).filter(id=id).first()
 
 
+def search_message_ids(user, query):
+    # Rust's reverse FTS walk avoids sorting the full result set. A bounded
+    # probe and scoped fallback keep sparse memberships from scanning it all.
+    terms = " ".join('"' + word.replace('"', '""') + '"' for word in query.split())
+    if not terms:
+        return []
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT m.id, ms.user_id IS NOT NULL FROM message_search_index idx "
+            "JOIN messages m ON m.id=idx.rowid LEFT JOIN memberships ms "
+            "ON ms.room_id=m.room_id AND ms.user_id=%s WHERE idx.body MATCH %s "
+            "ORDER BY idx.rowid DESC LIMIT 1000",
+            [user.id, terms],
+        )
+        ids = []
+        examined = 0
+        for message_id, reachable in cursor:
+            examined += 1
+            if reachable:
+                ids.append(message_id)
+                if len(ids) == 100:
+                    break
+        if len(ids) < 100 and examined == 1000:
+            cursor.execute(
+                "SELECT m.id FROM messages m JOIN message_search_index idx ON idx.rowid=m.id "
+                "JOIN memberships ms ON ms.room_id=m.room_id WHERE ms.user_id=%s "
+                "AND idx.body MATCH %s ORDER BY m.id DESC LIMIT 100",
+                [user.id, terms],
+            )
+            ids = [row[0] for row in cursor.fetchall()]
+    return ids
+
+
 def presentation_messages(query):
     return query.select_related("creator", "room").prefetch_related("boosts")
 

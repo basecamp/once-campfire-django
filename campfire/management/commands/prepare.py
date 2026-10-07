@@ -41,6 +41,10 @@ class Command(BaseCommand):
                     "Run the pinned Rails database migrations before upgrade: "
                     + ", ".join(sorted(missing))
                 )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS index_messages_on_room_id_and_updated_at ON messages(room_id,updated_at)"
+        )
+        db.commit()
         db.execute("PRAGMA journal_mode=WAL")
         db.close()
         self.stdout.write("Database ready")
