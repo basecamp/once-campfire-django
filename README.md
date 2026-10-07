@@ -45,6 +45,8 @@ with four hardware threads allocated to each app.
 
 ## Known differences
 
+- Search selects the newest 100 matching messages by insertion ID, then displays them in ID order. Backdated messages can appear in a different order from the original Rails app.
+
 - TLS terminates at a configured proxy.
 - Attached message downloads recheck room membership; native draft uploads belong to their
   uploader. Existing Rails unattached signed draft URLs remain usable after sign-in.
