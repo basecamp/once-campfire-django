@@ -7,7 +7,7 @@ from functools import wraps
 from urllib.parse import urlencode
 
 import bcrypt
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.db.models.expressions import RawSQL
 from django.db.models.functions import Lower
@@ -1101,12 +1101,7 @@ def ban(request, user_id):
 
 def transfer(request, id):
     if request.method == "GET":
-        response = HttpResponse(
-            '<!doctype html><form method="post"><input type="hidden" name="_method" value="put"><input type="hidden" name="authenticity_token" value="'
-            + html.escape(request.csrf_token)
-            + '"><button>Sign in to Campfire</button></form>'
-        )
-        return response
+        return page(request, "transfer", Transfer=id)
     if request.method not in ("PUT", "PATCH"):
         return HttpResponse(status=405)
     try:

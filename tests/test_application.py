@@ -13,8 +13,8 @@ import re
 import sqlite3
 import tempfile
 import unittest
-from datetime import timedelta
 from contextlib import closing
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -27,8 +27,8 @@ from campfire import jobs, rails
 from campfire.domain import (
     create_message,
     create_user,
-    publish_message,
     grant_memberships,
+    publish_message,
     search_message_ids,
     update_message,
 )
@@ -41,6 +41,7 @@ from campfire.models import (
     Message,
     RichText,
     Room,
+    Session,
     User,
     Webhook,
     now,
@@ -103,6 +104,19 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn('action="append"', rendered)
         self.assertIn("live scroll regression", rendered)
         self.assertNotIn("maintain_scroll", rendered)
+
+    def test_transfer_landing_page_loads_automatic_submit_without_get_side_effects(
+        self,
+    ):
+        token = rails.signed_id("User", self.member.id, "transfer")
+        before = Session.objects.count()
+        response = Client().get("/session/transfers/" + token)
+        self.assertEqual(200, response.status_code)
+        self.assertIn(b'data-controller="auto-submit"', response.content)
+        self.assertIn(b'<script type="importmap"', response.content)
+        self.assertIn(b'name="_method" value="put"', response.content)
+        self.assertIn(b"</form>", response.content)
+        self.assertEqual(before, Session.objects.count())
 
     def restore_connection(self):
         connection.close()
@@ -441,18 +455,20 @@ class ApplicationTests(unittest.TestCase):
     def test_attachment_transaction_failure_cleans_files_and_rows(self):
         output = io.BytesIO()
         Image.new("RGB", (10, 10), "red").save(output, "PNG")
-        with patch(
-            "campfire.media.process_attachment",
-            side_effect=RuntimeError("analysis failed"),
+        with (
+            patch(
+                "campfire.media.process_attachment",
+                side_effect=RuntimeError("analysis failed"),
+            ),
+            self.assertRaises(RuntimeError),
         ):
-            with self.assertRaises(RuntimeError):
-                create_message(
-                    self.admin,
-                    self.room,
-                    attachment=SimpleUploadedFile(
-                        "picture.png", output.getvalue(), "image/png"
-                    ),
-                )
+            create_message(
+                self.admin,
+                self.room,
+                attachment=SimpleUploadedFile(
+                    "picture.png", output.getvalue(), "image/png"
+                ),
+            )
         self.assertEqual(Message.objects.count(), 0)
         self.assertEqual(Blob.objects.count(), 0)
         self.assertFalse(any(p.is_file() for p in self.files.rglob("*")))
@@ -793,12 +809,14 @@ class ApplicationTests(unittest.TestCase):
             self.client.get("/searches?q=retained").content,
         )
         before = set(self.files.rglob("*"))
-        with patch(
-            "campfire.media.process_attachment",
-            side_effect=RuntimeError("analysis failed"),
+        with (
+            patch(
+                "campfire.media.process_attachment",
+                side_effect=RuntimeError("analysis failed"),
+            ),
+            self.assertRaises(RuntimeError),
         ):
-            with self.assertRaises(RuntimeError):
-                update_message(message, attachment=image("failure.png"))
+            update_message(message, attachment=image("failure.png"))
         self.assertEqual(
             Attachment.objects.get(record_type="Message", record_id=message.id).blob_id,
             new.id,
