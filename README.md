@@ -22,11 +22,15 @@ Storage defaults to `storage/db/production.sqlite3` and `storage/files`. Keep th
 both. `python manage.py backup` snapshots the application and job queue;
 `python manage.py restore` restores snapshots while the application is stopped.
 
-A single process works without Redis. Multiple HTTP workers require `REDIS_URL` for shared
-Cable publications and rate limits. Jobs use a leased SQLite queue that survives restarts. Put TLS termination in front of the application and configure
+A single process works without Redis. With `REDIS_URL`, HTTP workers default to the assigned
+CPU count, capped at four; `WEB_WORKERS` overrides it. Multiple workers require Redis for shared
+Cable publications and rate limits. Each worker has a 64 MiB page-cache budget;
+`CAMPFIRE_RESPONSE_CACHE_MB=0` disables it. Authentication and room access stay fresh, every
+SQLite commit invalidates cached pages, and CSRF masks and gzip padding remain per request.
+Jobs use a leased SQLite queue that survives restarts. Put TLS termination in front of the application and configure
 `TRUSTED_PROXIES` to that proxy's address.
 
-46 native integration and Rails golden test methods pass, including real media,
+Native integration and Rails golden tests cover real media,
 attachment updates and queued bot replies. Run `PATH="$PWD/.venv/bin:$PATH" bin/check`.
 
 ## Benchmarks
@@ -46,6 +50,9 @@ with four hardware cores allocated to each app.
 
 
 ## Known differences
+
+- Authenticated read pages use a bounded, commit-versioned cache after fresh authorization;
+  CSRF masks and response compression remain per request.
 
 - Sidebar connection refresh waits for the current Turbo frame to finish loading,
   preventing an aborted response on startup or reconnect. Obsolete connections and removed frames do not reload.

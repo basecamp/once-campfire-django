@@ -2,6 +2,7 @@ import secrets
 from datetime import timedelta
 from io import BytesIO
 
+from django.conf import settings
 from django.http import HttpResponse
 
 from . import rails
@@ -14,6 +15,10 @@ class SessionMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        if request.method == "GET" and settings.RESPONSE_CACHE_BYTES > 0:
+            from .response_cache import cache
+
+            request.response_cache_version = cache.version_for_request()
         request.session_data = {}
         encrypted = request.COOKIES.get("_campfire_session")
         if encrypted:

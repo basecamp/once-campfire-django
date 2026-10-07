@@ -53,6 +53,7 @@ from .rendering import (
     room_data,
     user_data,
 )
+from .response_cache import cached_page
 from .richtext import plain_text
 from .storage import staged_files
 
@@ -241,6 +242,7 @@ def join(request, code):
 
 
 @login_required
+@cached_page("room")
 def room(request, id=None, message_id=None):
     if id is None:
         last = user_rooms(request.current_user).last()
@@ -313,6 +315,7 @@ def serialize_message(m, request=None):
     }
 
 
+@cached_page("messages")
 def messages(request, room_id=None, id=None, edit=False, bot_key=None):
     if bot_key:
         try:
@@ -483,6 +486,7 @@ def messages(request, room_id=None, id=None, edit=False, bot_key=None):
 
 
 @login_required
+@cached_page("sidebar")
 def sidebar(request):
     memberships = list(
         Membership.objects.filter(user=request.current_user)
@@ -501,6 +505,7 @@ def sidebar(request):
 
 
 @login_required
+@cached_page("search")
 def searches(request):
     query = re.sub(r"[^\w]", " ", params(request).get("q", "")).strip()
     if request.method == "DELETE":

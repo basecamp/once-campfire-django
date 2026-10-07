@@ -7,6 +7,7 @@ os.environ.setdefault("SECRET_KEY_BASE", "tests-only")
 import django
 
 django.setup()
+import gzip
 import io
 import json
 import re
@@ -23,7 +24,7 @@ from django.db import connection
 from django.test import Client, override_settings
 from PIL import Image
 
-from campfire import jobs, rails
+from campfire import jobs, rails, views
 from campfire.domain import (
     create_message,
     create_user,
@@ -46,6 +47,7 @@ from campfire.models import (
     Webhook,
     now,
 )
+from campfire.response_cache import cache
 
 
 class ApplicationTests(unittest.TestCase):
@@ -95,6 +97,197 @@ class ApplicationTests(unittest.TestCase):
         grant_memberships(self.private, [self.admin])
         self.client = Client()
         self.token = self.login(self.client, self.admin)
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_cached_pages_skip_rendering_and_keep_fresh_csrf_masks(self):
+        create_message(self.admin, self.room, "cache body content")
+        for path in (
+            f"/rooms/{self.room.id}",
+            f"/rooms/{self.room.id}/messages",
+            "/users/me/sidebar",
+            "/searches?q=cache",
+        ):
+            self.client.get(path)
+            cache.clear()
+            renderer = "render_text" if path.endswith("/messages") else "page"
+            with patch(
+                "campfire.views." + renderer, wraps=getattr(views, renderer)
+            ) as render:
+                first = self.client.get(path)
+                second = self.client.get(path)
+            self.assertEqual(200, first.status_code)
+            self.assertEqual(200, second.status_code)
+            self.assertEqual(1, render.call_count, path)
+            self.assertNotIn(b"campfire-csrf-", second.content)
+            if b'name="csrf-token"' in first.content:
+                first_token = re.search(
+                    rb'name="csrf-token" content="([^"]+)"', first.content
+                )[1]
+                second_token = re.search(
+                    rb'name="csrf-token" content="([^"]+)"', second.content
+                )[1]
+                self.assertNotEqual(first_token, second_token)
+                raw = rails.decrypt_cookie(
+                    "_campfire_session", self.client.cookies["_campfire_session"].value
+                )["_csrf_token"]
+                self.assertTrue(
+                    rails.valid_csrf(
+                        rails.decode64(raw), second_token.decode(), path, "POST"
+                    )
+                )
+
+    def test_cached_page_does_not_replace_real_token_like_message_text(self):
+        create_message(self.admin, self.room, "literal " + self.token)
+        path = f"/rooms/{self.room.id}"
+        self.client.get(path)
+        self.client.get(path)
+        response = self.client.get(path)
+        self.assertIn(("literal " + self.token).encode(), response.content)
+        token = re.search(rb'name="csrf-token" content="([^"]+)"', response.content)[
+            1
+        ].decode()
+        self.assertNotEqual(self.token, token)
+        created = self.client.post(
+            f"/rooms/{self.room.id}/messages",
+            {"authenticity_token": token, "message[body]": "fresh cached token"},
+        )
+        self.assertEqual(200, created.status_code)
+        self.assertTrue(
+            RichText.objects.filter(body__contains="fresh cached token").exists()
+        )
+
+    def test_cached_pages_keep_gzip_masks_fresh(self):
+        path = f"/rooms/{self.room.id}"
+        self.client.get(path)
+        cache.clear()
+        with patch("campfire.views.page", wraps=views.page) as render:
+            first = self.client.get(path, HTTP_ACCEPT_ENCODING="gzip")
+            second = self.client.get(path, HTTP_ACCEPT_ENCODING="gzip")
+        self.assertEqual(1, render.call_count)
+        self.assertEqual("gzip", second["Content-Encoding"])
+        first_body = gzip.decompress(first.content)
+        second_body = gzip.decompress(second.content)
+        self.assertNotIn(b"campfire-csrf-", second_body)
+        self.assertNotEqual(
+            re.search(rb'name="csrf-token" content="([^"]+)"', first_body)[1],
+            re.search(rb'name="csrf-token" content="([^"]+)"', second_body)[1],
+        )
+
+    def test_response_cache_bypasses_incoming_flash_state(self):
+        path = f"/rooms/{self.room.id}"
+        self.client.get(path)
+        self.client.get(path)
+        session = rails.decrypt_cookie(
+            "_campfire_session", self.client.cookies["_campfire_session"].value
+        )
+        session["flash"] = {"flashes": {"notice": "temporary notice"}, "discard": []}
+        self.client.cookies["_campfire_session"] = rails.encrypt_cookie(
+            "_campfire_session", session
+        )
+        with patch("campfire.views.page", wraps=views.page) as render:
+            self.client.get(path)
+            self.client.get(path)
+        self.assertEqual(2, render.call_count)
+
+    def test_cached_pages_observe_local_and_foreign_database_writes(self):
+        path = f"/rooms/{self.room.id}"
+        create_message(self.admin, self.room, "first cached message")
+        self.client.get(path)
+        self.client.get(path)
+        create_message(self.admin, self.room, "local committed message")
+        self.assertIn(b"local committed message", self.client.get(path).content)
+        with closing(sqlite3.connect(self.database)) as db:
+            db.execute(
+                "UPDATE users SET name='Foreign user name' WHERE id=?", (self.admin.id,)
+            )
+            db.commit()
+        self.assertIn(b"Foreign user name", self.client.get(path).content)
+
+    def test_cached_pages_recheck_membership_and_session(self):
+        path = f"/rooms/{self.private.id}"
+        self.client.get(path)
+        self.client.get(path)
+        with closing(sqlite3.connect(self.database)) as db:
+            db.execute(
+                "DELETE FROM memberships WHERE room_id=? AND user_id=?",
+                (self.private.id, self.admin.id),
+            )
+            db.commit()
+        self.assertEqual(302, self.client.get(path).status_code)
+        self.client.get(f"/rooms/{self.room.id}")
+        Session.objects.filter(user=self.admin).delete()
+        self.assertEqual("/session/new", self.client.get(f"/rooms/{self.room.id}").url)
+
+    def test_cached_pages_separate_viewers_origins_and_frames(self):
+        other = Client()
+        self.login(other, self.member)
+        path = f"/rooms/{self.room.id}"
+        self.client.get(path)
+        with patch("campfire.views.page", wraps=views.page) as render:
+            self.client.get(path)
+            self.client.get(path)
+            self.client.get(path, HTTP_HOST="different.example.test:8081")
+            self.client.get(path, HTTP_TURBO_FRAME="different-frame")
+            other.get(path)
+        self.assertEqual(4, render.call_count)
+
+    def test_response_cache_off_and_byte_budget(self):
+        path = f"/rooms/{self.room.id}"
+        with (
+            override_settings(RESPONSE_CACHE_BYTES=0),
+            patch("campfire.views.page", wraps=views.page) as render,
+        ):
+            self.client.get(path)
+            self.client.get(path)
+        self.assertEqual(2, render.call_count)
+        self.assertEqual(0, cache.bytes)
+        with override_settings(RESPONSE_CACHE_BYTES=100):
+            self.client.get(path)
+        self.assertEqual(0, cache.bytes)
+
+    def test_response_cache_does_not_admit_old_authentication_under_new_epoch(self):
+        path = f"/rooms/{self.room.id}"
+        self.client.get(path)
+        cache.clear()
+        from campfire.middleware import SecurityMiddleware
+
+        original = SecurityMiddleware.__call__
+
+        def commit_after_authentication(middleware, request):
+            with closing(sqlite3.connect(self.database)) as db:
+                db.execute(
+                    "UPDATE users SET name='Changed after authentication' WHERE id=?",
+                    (self.admin.id,),
+                )
+                db.commit()
+            return original(middleware, request)
+
+        with patch.object(SecurityMiddleware, "__call__", commit_after_authentication):
+            self.client.get(path)
+        self.assertEqual(0, cache.bytes)
+        self.assertIn(b"Changed after authentication", self.client.get(path).content)
+
+    def test_response_cache_does_not_admit_across_a_commit(self):
+        path = f"/rooms/{self.room.id}"
+        self.client.get(path)
+        cache.clear()
+        original = views.page
+
+        def concurrent_commit(*args, **kwargs):
+            response = original(*args, **kwargs)
+            with closing(sqlite3.connect(self.database)) as db:
+                db.execute(
+                    "UPDATE users SET name='Committed during render' WHERE id=?",
+                    (self.admin.id,),
+                )
+                db.commit()
+            return response
+
+        with patch("campfire.views.page", side_effect=concurrent_commit):
+            self.client.get(path)
+        self.assertEqual(0, cache.bytes)
+        self.assertIn(b"Committed during render", self.client.get(path).content)
 
     def test_live_message_append_uses_messages_controller_scrolling(self):
         message = create_message(self.admin, self.room, "live scroll regression")
@@ -931,3 +1124,32 @@ class ApplicationTests(unittest.TestCase):
                     response["Content-Disposition"].startswith("attachment;")
                 )
                 response.close()
+
+
+class ServerConfigurationTests(unittest.TestCase):
+    def test_single_worker_needs_no_redis(self):
+        from campfire.server import worker_count
+
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(1, worker_count())
+
+    def test_redis_worker_default_respects_affinity_and_cap(self):
+        from campfire.server import worker_count
+
+        with patch.dict(os.environ, {"REDIS_URL": "redis://localhost"}, clear=True):
+            with patch("os.sched_getaffinity", return_value={2, 4}):
+                self.assertEqual(2, worker_count())
+            with patch("os.sched_getaffinity", return_value=set(range(64))):
+                self.assertEqual(4, worker_count())
+
+    def test_explicit_workers_require_redis_and_positive_count(self):
+        from campfire.server import worker_count
+
+        with patch.dict(os.environ, {"WEB_WORKERS": "2"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "REDIS_URL"):
+                worker_count()
+            os.environ["REDIS_URL"] = "redis://localhost"
+            self.assertEqual(2, worker_count())
+            os.environ["WEB_WORKERS"] = "0"
+            with self.assertRaisesRegex(ValueError, "positive"):
+                worker_count()
