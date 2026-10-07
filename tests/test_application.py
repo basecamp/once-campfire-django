@@ -133,7 +133,11 @@ class ApplicationTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn(f'data-message-id="{message.id}"'.encode(), response.content)
             self.assertIn(b"Coffee", response.content)
-        self.assertIn(b"All Talk", self.client.get("/users/me/sidebar").content)
+        sidebar = self.client.get("/users/me/sidebar").content
+        self.assertIn(b"All Talk", sidebar)
+        self.assertIn(b"<!DOCTYPE html>", sidebar)
+        self.assertIn(b"</html>", sidebar)
+        self.assertIn(f'name="current-user-id" content="{self.admin.id}"'.encode(), sidebar)
 
     def test_writes_update_fts_touch_room_and_mark_only_disconnected_members_unread(
         self,
