@@ -60,3 +60,5 @@ Native controls check payload order/count, one queue commit and whole-batch roll
 
 Session IDs draw fresh randomness only when absent from the incoming encrypted cookie. Native
 controls verify exact cookie continuity and one-time IDs for retained legacy cookie fields.
+
+Creation optimizations draw on Marcello Costagliola’s [Rails #336](https://github.com/basecamp/once-campfire/pull/336) first-unread policy, Silvio Ney’s [Laravel #5](https://github.com/basecamp/once-campfire-laravel/pull/5) preparation and batching work, and Paweł Stachula’s [Express #4](https://github.com/basecamp/once-campfire-express/pull/4) fragment reuse.
