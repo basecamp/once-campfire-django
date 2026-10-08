@@ -30,19 +30,8 @@ class SessionMiddleware:
                 pass
         if not isinstance(request.session_data, dict):
             request.session_data = {}
-        try:
-            if (
-                "_csrf_token" in request.session_data
-                and len(rails.decode64(request.session_data["_csrf_token"])) != 32
-            ):
-                request.session_data.pop("_csrf_token")
-        except (ValueError, TypeError):
-            request.session_data.pop("_csrf_token", None)
         request.session_original = request.session_data.copy()
         request.session_data.setdefault("session_id", secrets.token_hex(16))
-        request.session_data.setdefault(
-            "_csrf_token", rails.b64(secrets.token_bytes(32))
-        )
         request.current_user = request.current_session = None
         raw = request.COOKIES.get("session_token")
         if raw:
@@ -85,9 +74,6 @@ class SessionMiddleware:
                     request.authenticated_by_bot = True
             except (ValueError, TypeError):
                 pass
-        request.csrf_token = rails.mask_csrf(
-            rails.decode64(request.session_data["_csrf_token"])
-        )
         host_token = request_host.set(request.get_host().split(":")[0])
         try:
             response = self.get_response(request)
@@ -183,21 +169,20 @@ class SecurityMiddleware:
                 disk_upload = isinstance(payload, dict) and "key" in payload
             except (ValueError, TypeError):
                 pass
-        # Active Storage disk writes authenticate their expiring, purpose-bound token.
-        if request.method not in ("GET", "HEAD", "OPTIONS") and not (
-            bot_route or disk_upload
-        ):
-            token = request.headers.get("X-CSRF-Token") or request.POST.get(
-                "authenticity_token"
-            )
-            origin = request.headers.get("Origin")
-            if origin and origin != f"{request.scheme}://{request.get_host()}":
-                return HttpResponse(status=422)
-            if not rails.valid_csrf(
-                rails.decode64(request.session_data["_csrf_token"]),
-                token,
-                request.path,
-                request.method,
-            ):
+        if request.method not in ("GET", "HEAD") and not (bot_route or disk_upload):
+            if not request_allowed(request):
                 return HttpResponse(status=422)
         return self.get_response(request)
+
+
+def request_allowed(request):
+    """Match Rust's Fetch Metadata policy, using the trusted effective URL."""
+    if request.method in ("GET", "HEAD"):
+        return True
+    origin = request.headers.get("Origin")
+    if origin is not None and origin != f"{request.scheme}://{request.get_host()}":
+        return False
+    site = request.headers.get("Sec-Fetch-Site")
+    if site is None:
+        return request.scheme == "http" and not settings.FORCE_SSL
+    return site in ("same-origin", "same-site")

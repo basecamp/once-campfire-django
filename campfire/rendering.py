@@ -223,7 +223,6 @@ def context(request, screen, **kwargs):
         Title="Campfire",
         Frame=bool(request.headers.get("Turbo-Frame")),
         Origin=f"{request.scheme}://{request.get_host()}",
-        CSRF=request.csrf_token,
         Version="once-campfire-django",
         VAPIDPublicKey=os.environ.get("VAPID_PUBLIC_KEY", ""),
         CustomStyles=Markup("<style>" + account.custom_styles + "</style>")
@@ -263,21 +262,6 @@ def render_text(name, data):
 def page(request, name, **kwargs):
     data = context(request, name, **kwargs)
     body = render_text(name, data)
-    meta = (
-        '<meta name="csrf-param" content="authenticity_token"><meta name="csrf-token" content="'
-        + html.escape(request.csrf_token)
-        + '">'
-    )
-    body = body.replace("</head>", meta + "</head>")
-    body = re.sub(
-        r'(<form\b[^>]*\bmethod="post"[^>]*>)',
-        lambda m: m[0]
-        + '<input type="hidden" name="authenticity_token" value="'
-        + html.escape(request.csrf_token)
-        + '">',
-        body,
-        flags=re.I,
-    )
     return HttpResponse(body)
 
 

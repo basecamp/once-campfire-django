@@ -10,7 +10,6 @@ django.setup()
 import gzip
 import io
 import json
-import re
 import sqlite3
 import tempfile
 import unittest
@@ -100,78 +99,40 @@ class ApplicationTests(unittest.TestCase):
         cache.clear()
         self.addCleanup(cache.clear)
 
-    def test_cached_pages_skip_rendering_and_keep_fresh_csrf_masks(self):
-        create_message(self.admin, self.room, "cache body content")
+    def test_cached_pages_reuse_complete_token_free_representations(self):
+        create_message(
+            self.admin,
+            self.room,
+            "literal campfire-csrf-not-a-token authenticity_token",
+        )
         for path in (
             f"/rooms/{self.room.id}",
             f"/rooms/{self.room.id}/messages",
             "/users/me/sidebar",
-            "/searches?q=cache",
+            "/searches?q=literal",
         ):
-            self.client.get(path)
-            cache.clear()
-            renderer = "render_text" if path.endswith("/messages") else "page"
-            with patch(
-                "campfire.views." + renderer, wraps=getattr(views, renderer)
-            ) as render:
-                first = self.client.get(path)
-                second = self.client.get(path)
-            self.assertEqual(200, first.status_code)
-            self.assertEqual(200, second.status_code)
-            self.assertEqual(1, render.call_count, path)
-            self.assertNotIn(b"campfire-csrf-", second.content)
-            if b'name="csrf-token"' in first.content:
-                first_token = re.search(
-                    rb'name="csrf-token" content="([^"]+)"', first.content
-                )[1]
-                second_token = re.search(
-                    rb'name="csrf-token" content="([^"]+)"', second.content
-                )[1]
-                self.assertNotEqual(first_token, second_token)
-                raw = rails.decrypt_cookie(
-                    "_campfire_session", self.client.cookies["_campfire_session"].value
-                )["_csrf_token"]
-                self.assertTrue(
-                    rails.valid_csrf(
-                        rails.decode64(raw), second_token.decode(), path, "POST"
-                    )
+            for encoding in ("identity", "gzip"):
+                self.client.get(path)
+                cache.clear()
+                renderer = "render_text" if path.endswith("/messages") else "page"
+                with patch(
+                    "campfire.views." + renderer, wraps=getattr(views, renderer)
+                ) as render:
+                    first = self.client.get(path, HTTP_ACCEPT_ENCODING=encoding)
+                    second = self.client.get(path, HTTP_ACCEPT_ENCODING=encoding)
+                self.assertEqual(200, second.status_code)
+                self.assertEqual(1, render.call_count)
+                self.assertEqual(first.content, second.content)
+                body = (
+                    gzip.decompress(second.content)
+                    if second.get("Content-Encoding") == "gzip"
+                    else second.content
                 )
-
-    def test_cached_page_does_not_replace_real_token_like_message_text(self):
-        create_message(self.admin, self.room, "literal " + self.token)
-        path = f"/rooms/{self.room.id}"
-        self.client.get(path)
-        self.client.get(path)
-        response = self.client.get(path)
-        self.assertIn(("literal " + self.token).encode(), response.content)
-        token = re.search(rb'name="csrf-token" content="([^"]+)"', response.content)[
-            1
-        ].decode()
-        self.assertNotEqual(self.token, token)
-        created = self.client.post(
-            f"/rooms/{self.room.id}/messages",
-            {"authenticity_token": token, "message[body]": "fresh cached token"},
-        )
-        self.assertEqual(200, created.status_code)
-        self.assertTrue(
-            RichText.objects.filter(body__contains="fresh cached token").exists()
-        )
-
-    def test_cached_pages_keep_gzip_masks_fresh(self):
-        path = f"/rooms/{self.room.id}"
-        self.client.get(path)
-        cache.clear()
-        with patch("campfire.views.page", wraps=views.page) as render:
-            first = self.client.get(path, HTTP_ACCEPT_ENCODING="gzip")
-            second = self.client.get(path, HTTP_ACCEPT_ENCODING="gzip")
-        self.assertEqual(1, render.call_count)
-        self.assertEqual("gzip", second["Content-Encoding"])
-        first_body = gzip.decompress(first.content)
-        second_body = gzip.decompress(second.content)
-        self.assertNotIn(b"campfire-csrf-", second_body)
-        self.assertNotEqual(
-            re.search(rb'name="csrf-token" content="([^"]+)"', first_body)[1],
-            re.search(rb'name="csrf-token" content="([^"]+)"', second_body)[1],
+                self.assertNotIn(b'name="csrf-token"', body)
+                self.assertNotIn(b'name="authenticity_token"', body)
+        self.assertIn(
+            b"literal campfire-csrf-not-a-token authenticity_token",
+            self.client.get(f"/rooms/{self.room.id}").content,
         )
 
     def test_response_cache_bypasses_incoming_flash_state(self):
@@ -317,9 +278,8 @@ class ApplicationTests(unittest.TestCase):
 
     def login(self, client, user):
         response = client.get("/session/new")
-        token = re.search(
-            r'name="csrf-token" content="([^"]+)"', response.content.decode()
-        )[1]
+        self.assertNotIn(b'name="csrf-token"', response.content)
+        token = "legacy-tab-token"
         response = client.post(
             "/session",
             {
@@ -555,22 +515,100 @@ class ApplicationTests(unittest.TestCase):
             200,
         )
 
-    def test_csrf_and_cross_origin_fail_closed(self):
-        self.assertEqual(
-            self.client.post(
-                f"/rooms/{self.room.id}/messages", {"message[body]": "hacked"}
-            ).status_code,
-            422,
-        )
+    def test_fetch_metadata_and_cross_origin_fail_closed(self):
+        for site in ("cross-site", "none", "invalid", ""):
+            self.assertEqual(
+                self.client.post(
+                    f"/rooms/{self.room.id}/messages",
+                    {"message[body]": "hacked"},
+                    HTTP_SEC_FETCH_SITE=site,
+                ).status_code,
+                422,
+            )
         self.assertEqual(
             self.client.post(
                 f"/rooms/{self.room.id}/messages",
-                {"message[body]": "hacked", "authenticity_token": self.token},
+                {"message[body]": "hacked"},
+                HTTP_SEC_FETCH_SITE="same-site",
                 HTTP_ORIGIN="https://attacker.test",
             ).status_code,
             422,
         )
         self.assertEqual(Message.objects.count(), 0)
+
+    def test_fetch_metadata_policy_matrix(self):
+        from django.test import RequestFactory
+        from campfire.middleware import request_allowed
+
+        for method in (
+            "GET",
+            "HEAD",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS",
+            "TRACE",
+        ):
+            for secure in (False, True):
+                base = ("https" if secure else "http") + "://testserver"
+                for forced in (False, True):
+                    for site in (
+                        None,
+                        "same-origin",
+                        "same-site",
+                        "cross-site",
+                        "none",
+                        "invalid",
+                        "",
+                        "Same-Origin",
+                        "same-origin, same-site",
+                    ):
+                        for origin in (None, base, "null", "https://attacker.test"):
+                            headers = {}
+                            if site is not None:
+                                headers["HTTP_SEC_FETCH_SITE"] = site
+                            if origin is not None:
+                                headers["HTTP_ORIGIN"] = origin
+                            request = RequestFactory().generic(
+                                method, "/session", secure=secure, **headers
+                            )
+                            expected = method in ("GET", "HEAD") or (
+                                (origin is None or origin == base)
+                                and (
+                                    site in ("same-origin", "same-site")
+                                    or (site is None and not secure and not forced)
+                                )
+                            )
+                            with (
+                                self.subTest(
+                                    method=method,
+                                    secure=secure,
+                                    forced=forced,
+                                    site=site,
+                                    origin=origin,
+                                ),
+                                override_settings(FORCE_SSL=forced),
+                            ):
+                                self.assertEqual(expected, request_allowed(request))
+
+    def test_no_token_secure_login_and_legacy_cookie(self):
+        client = Client()
+        client.cookies["_campfire_session"] = rails.encrypt_cookie(
+            "_campfire_session",
+            {"session_id": "old-tab", "_csrf_token": "legacy-value"},
+        )
+        data = {"email_address": self.admin.email_address, "password": "secret"}
+        self.assertEqual(422, client.post("/session", data, secure=True).status_code)
+        self.assertEqual(
+            302,
+            client.post(
+                "/session", data, secure=True, HTTP_SEC_FETCH_SITE="same-origin"
+            ).status_code,
+        )
+        response = client.get(f"/rooms/{self.room.id}", secure=True)
+        self.assertNotIn(b'name="authenticity_token"', response.content)
+        self.assertNotIn(b'name="csrf-token"', response.content)
 
     def test_bot_cannot_enter_browser_routes_and_real_raw_api(self):
         bot = create_user(name="Bot", role=2, bot_token="abcdefgh1234")
@@ -605,7 +643,7 @@ class ApplicationTests(unittest.TestCase):
                 "no-auth",
                 content_type="text/plain",
             ).status_code,
-            422,
+            401,
         )
 
     def test_image_upload_creates_real_thumb_metadata_and_range_download(self):
@@ -802,13 +840,17 @@ class ApplicationTests(unittest.TestCase):
                 }
             ),
             content_type="application/json",
-            HTTP_X_CSRF_TOKEN=self.token,
+            secure=True,
+            HTTP_SEC_FETCH_SITE="same-origin",
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
         path = urlsplit(data["direct_upload"]["url"]).path
         self.assertEqual(
-            Client().put(path, data=raw, content_type="text/plain").status_code, 204
+            Client().put(path, data=raw, content_type="text/plain").status_code, 401
+        )
+        self.assertEqual(
+            self.client.put(path, data=raw, content_type="text/plain").status_code, 204
         )
         from campfire.storage import blob_url
 
@@ -820,8 +862,11 @@ class ApplicationTests(unittest.TestCase):
         self.login(other, self.other)
         self.assertEqual(other.get(blob_url(blob)).status_code, 403)
         self.assertEqual(
+            other.put(path, data=raw, content_type="text/plain").status_code, 403
+        )
+        self.assertEqual(
             Client().put(path + "bad", data=raw, content_type="text/plain").status_code,
-            422,
+            404,
         )
         response = self.post(
             f"/rooms/{self.room.id}/messages",
@@ -932,15 +977,12 @@ class ApplicationTests(unittest.TestCase):
         Account.objects.all().delete()
         client = Client()
         page = client.get("/first_run")
-        token = re.search(rb'<meta name="csrf-token" content="([^"]+)"', page.content)[
-            1
-        ].decode()
+        self.assertNotIn(b'name="csrf-token"', page.content)
         image = io.BytesIO()
         Image.new("RGB", (10, 10), "red").save(image, "PNG")
         response = client.post(
             "/first_run",
             {
-                "authenticity_token": token,
                 "user[name]": "Founder",
                 "user[email_address]": "founder@example.test",
                 "user[password]": "secret",

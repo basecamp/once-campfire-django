@@ -19,8 +19,8 @@ are not claimed. Raw test and benchmark output remains ignored under `tmp/`.
 | Benchmarks | Independent matched production HTTP runs verify identical ordered message/search windows, successful acknowledged writes, FTS and SQLite integrity. Actual JPEG uploads resize to 1200×675. Two paced runs admit 100 sockets and deliver all 30 messages to every socket; these are measured workloads, not capacity limits. Raw output stays ignored. |
 | Deployment | Native schema preparation and version validation, isolated job SQLite queue, atomic snapshots and checked restore; production Uvicorn multiprocess requires shared Redis; TLS at external proxy |
 
-46 native integration and golden test methods include 19 crypto methods covering independent signed IDs,
-app verifiers, encrypted/signed cookies, SGIDs,189 CSRF cases and legacy sessions, plus actual
+63 native integration and golden test methods include 19 crypto methods covering independent signed IDs,
+app verifiers, encrypted/signed cookies, SGIDs,189 historical CSRF crypto vectors and legacy sessions, plus actual
 SQLite workflows/media/rollback/job recovery/backup/restore. No skipped seed-dependent tests.
 
 The wider independent rich-text corpus comparison checked 625 non-ActionText-attachment inputs:
@@ -38,3 +38,10 @@ browser-vendor push delivery requires operator VAPID keys and provider subscript
 Queued jobs and app snapshots are separate atomic captures. Restoring may replay side effects;
 delivery is at least once. Unsupported older schemas are rejected with required source migration
 versions rather than silently modifying an existing installation.
+
+Browser request forgery protection deliberately uses the Rust Fetch Metadata policy, not the
+historical Rails token protocol. Native tests cover the complete method/origin/metadata/TLS
+matrix, HTTPS token-free login, old cookie continuity, token-free setup/transfer and signed
+owner-authorized uploads. Complete identity/gzip cache bytes preserve literal token-like user
+text, with fresh authorization and foreign-commit invalidation. Uvicorn's configured trusted
+proxy policy supplies the effective scheme; forwarded headers are not trusted in Django itself.

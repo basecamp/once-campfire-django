@@ -159,6 +159,16 @@ def disk(request, token):
         data = rails.verify(token, "ActiveStorage", purpose)
         path = path_for(data["key"])
         if request.method == "PUT":
+            if request.current_session is None:
+                return HttpResponse(status=401)
+            blob = Blob.objects.filter(key=data["key"]).first()
+            owner = (
+                json.loads(blob.metadata or "{}").get("campfire_upload_user_id")
+                if blob
+                else None
+            )
+            if blob is None or (owner is not None and owner != request.current_user.id):
+                return HttpResponse(status=403)
             raw = request.body
             if (
                 len(raw) != data["content_length"]

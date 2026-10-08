@@ -1,7 +1,7 @@
-"""Versioned page bodies, with authorization and fresh CSRF masks on every request."""
+"""Bounded immutable responses after fresh authorization and SQLite epoch checks."""
 
+import gzip
 import json
-import secrets
 import sqlite3
 import threading
 from collections import OrderedDict
@@ -12,6 +12,8 @@ from pathlib import Path
 from django.conf import settings
 from django.db import connection
 from django.http import HttpResponse
+from django.middleware.gzip import re_accepts_gzip
+from django.utils.cache import patch_vary_headers
 
 from .domain import get_room
 
@@ -80,7 +82,7 @@ class ResponseCache:
         size = (
             len(key)
             + len(entry[0])
-            + sum(len(name) + len(value) for name, value in entry[2])
+            + sum(len(name) + len(value) for name, value in entry[1])
             + 256
         )
         if size > min(budget, 1024 * 1024):
@@ -145,6 +147,7 @@ def cached_page(scope):
                     request.headers.get("Accept", ""),
                     request.headers.get("User-Agent", ""),
                     request.headers.get("Turbo-Frame", ""),
+                    request.headers.get("Accept-Encoding", ""),
                 ],
                 sort_keys=True,
                 separators=(",", ":"),
@@ -158,38 +161,43 @@ def cached_page(scope):
             if version != getattr(request, "response_cache_version", None):
                 return view(request, *args, **kwargs)
             if stored is not None:
-                (body, marker, headers), _ = stored
+                (body, headers), _ = stored
                 if scope == "room":
                     request.last_room = room.id
                 response = HttpResponse(
-                    body.replace(marker, request.csrf_token.encode()),
+                    body,
                     headers=dict(headers),
                 )
                 return response
 
-            # Render an unexposed random placeholder, rather than replacing a
-            # real token that might also appear in legitimate message text.
-            token = request.csrf_token
-            marker = "campfire-csrf-" + secrets.token_hex(32)
             original_session = deepcopy(request.session_data)
-            request.csrf_token = marker
-            try:
-                response = view(request, *args, **kwargs)
-            finally:
-                request.csrf_token = token
+            response = view(request, *args, **kwargs)
             if response.streaming:
                 return response
-            body = response.content
-            response.content = body.replace(marker.encode(), token.encode())
+            # Store the selected complete representation once; the outer gzip
+            # middleware leaves already encoded responses unchanged.
+            if len(response.content) >= 200 and not response.has_header(
+                "Content-Encoding"
+            ):
+                patch_vary_headers(response, ["Accept-Encoding"])
+                if re_accepts_gzip.search(request.headers.get("Accept-Encoding", "")):
+                    encoded = gzip.compress(response.content, compresslevel=6, mtime=0)
+                    if len(encoded) < len(response.content):
+                        response.content = encoded
+                        response["Content-Encoding"] = "gzip"
+                        response["Content-Length"] = len(encoded)
+                        if response.has_header("ETag") and not response[
+                            "ETag"
+                        ].startswith("W/"):
+                            response["ETag"] = "W/" + response["ETag"]
             if (
                 version is not None
                 and response.status_code == 200
                 and response.get("Content-Type", "").startswith("text/html")
                 and not response.cookies
-                and not response.has_header("Content-Encoding")
                 and request.session_data == original_session
             ):
-                entry = body, marker.encode(), tuple(response.items())
+                entry = response.content, tuple(response.items())
                 cache.put(key, version, entry, budget)
             return response
 

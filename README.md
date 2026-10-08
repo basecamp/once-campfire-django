@@ -26,7 +26,7 @@ A single process works without Redis. With `REDIS_URL`, HTTP workers default to 
 CPU count, capped at four; `WEB_WORKERS` overrides it. Multiple workers require Redis for shared
 Cable publications and rate limits. Each worker has a 64 MiB page-cache budget;
 `CAMPFIRE_RESPONSE_CACHE_MB=0` disables it. Authentication and room access stay fresh, every
-SQLite commit invalidates cached pages, and CSRF masks and gzip padding remain per request.
+SQLite commit invalidates complete cached HTML and gzip bodies.
 Jobs use a leased SQLite queue that survives restarts. Put TLS termination in front of the application and configure
 `TRUSTED_PROXIES` to that proxy's address.
 
@@ -51,8 +51,15 @@ with four hardware cores allocated to each app.
 
 ## Known differences
 
+- Browser writes use Fetch Metadata instead of CSRF tokens. Unsafe requests reject a mismatched
+  or null Origin and require `Sec-Fetch-Site: same-origin` or `same-site`; missing metadata is
+  accepted only over plain HTTP without `FORCE_SSL=1`. GET/HEAD and authenticated bot routes
+  retain their existing behavior. Forms and uploads generate no CSRF tokens; old signed cookies
+  and token-bearing tabs continue to work. Signed disk uploads require the authenticated owner
+  and the expiring upload capability, independently of Fetch Metadata.
+
 - Authenticated read pages use a bounded, commit-versioned cache after fresh authorization;
-  CSRF masks and response compression remain per request.
+  complete HTML and gzip representations are reused while cookies remain per request.
 
 - Sidebar connection refresh waits for the current Turbo frame to finish loading,
   preventing an aborted response on startup or reconnect. Obsolete connections and removed frames do not reload.
