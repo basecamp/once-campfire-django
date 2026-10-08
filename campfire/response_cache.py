@@ -1,6 +1,5 @@
 """Bounded immutable responses after fresh authorization and SQLite epoch checks."""
 
-import gzip
 import json
 import sqlite3
 import threading
@@ -12,9 +11,8 @@ from pathlib import Path
 from django.conf import settings
 from django.db import connection
 from django.http import HttpResponse
-from django.middleware.gzip import re_accepts_gzip
-from django.utils.cache import patch_vary_headers
 
+from .compression import CompressionMiddleware
 from .domain import get_room
 
 
@@ -176,20 +174,9 @@ def cached_page(scope):
                 return response
             # Store the selected complete representation once; the outer gzip
             # middleware leaves already encoded responses unchanged.
-            if len(response.content) >= 200 and not response.has_header(
-                "Content-Encoding"
-            ):
-                patch_vary_headers(response, ["Accept-Encoding"])
-                if re_accepts_gzip.search(request.headers.get("Accept-Encoding", "")):
-                    encoded = gzip.compress(response.content, compresslevel=6, mtime=0)
-                    if len(encoded) < len(response.content):
-                        response.content = encoded
-                        response["Content-Encoding"] = "gzip"
-                        response["Content-Length"] = len(encoded)
-                        if response.has_header("ETag") and not response[
-                            "ETag"
-                        ].startswith("W/"):
-                            response["ETag"] = "W/" + response["ETag"]
+            response = CompressionMiddleware(lambda _: response).process_response(
+                request, response
+            )
             if (
                 version is not None
                 and response.status_code == 200

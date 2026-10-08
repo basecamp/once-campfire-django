@@ -592,6 +592,31 @@ class ApplicationTests(unittest.TestCase):
                             ):
                                 self.assertEqual(expected, request_allowed(request))
 
+    def test_gzip_quality_exclusions_apply_to_cached_and_native_responses(self):
+        path = f"/rooms/{self.room.id}"
+        for budget in (0, 64 * 1024 * 1024):
+            with override_settings(RESPONSE_CACHE_BYTES=budget):
+                identity = self.client.get(path, HTTP_ACCEPT_ENCODING="identity")
+                for encoding in (
+                    "gzip;q=0",
+                    "gzip;q=0, *;q=1",
+                    "*;q=0",
+                    "br",
+                    "gzip;q=invalid",
+                    "gzip;q=.5, identity;q=1",
+                    ",".join(["br"] * 17 + ["gzip;q=0", "*;q=1"]),
+                ):
+                    with self.subTest(budget=budget, encoding=encoding):
+                        response = self.client.get(path, HTTP_ACCEPT_ENCODING=encoding)
+                        self.assertFalse(response.has_header("Content-Encoding"))
+                        self.assertEqual(identity.content, response.content)
+                        self.assertIn("Accept-Encoding", response["Vary"])
+                first = self.client.get(path, HTTP_ACCEPT_ENCODING="gzip")
+                second = self.client.get(path, HTTP_ACCEPT_ENCODING="gzip")
+                self.assertEqual("gzip", first["Content-Encoding"])
+                self.assertEqual(first.content, second.content)
+                self.assertEqual(identity.content, gzip.decompress(first.content))
+
     def test_no_token_secure_login_and_legacy_cookie(self):
         client = Client()
         client.cookies["_campfire_session"] = rails.encrypt_cookie(
@@ -868,6 +893,16 @@ class ApplicationTests(unittest.TestCase):
             Client().put(path + "bad", data=raw, content_type="text/plain").status_code,
             404,
         )
+        original_metadata = blob.metadata
+        for metadata in ("[]", "123", '"legacy"', "not-json"):
+            blob.metadata = metadata
+            blob.save(update_fields=["metadata"])
+            self.assertEqual(
+                204,
+                self.client.put(path, data=raw, content_type="text/plain").status_code,
+            )
+        blob.metadata = original_metadata
+        blob.save(update_fields=["metadata"])
         response = self.post(
             f"/rooms/{self.room.id}/messages",
             {"message[body]": "", "message[attachment]": data["signed_id"]},

@@ -53,7 +53,7 @@ with four hardware cores allocated to each app.
 
 - Browser writes use Fetch Metadata instead of CSRF tokens. Unsafe requests reject a mismatched
   or null Origin and require `Sec-Fetch-Site: same-origin` or `same-site`; missing metadata is
-  accepted only over plain HTTP without `FORCE_SSL=1`. GET/HEAD and authenticated bot routes
+  accepted only over plain HTTP without `FORCE_SSL=1` or `true`. GET/HEAD and authenticated bot routes
   retain their existing behavior. Forms and uploads generate no CSRF tokens; old signed cookies
   and token-bearing tabs continue to work. Signed disk uploads require the authenticated owner
   and the expiring upload capability, independently of Fetch Metadata.

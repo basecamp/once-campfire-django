@@ -6,7 +6,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY_BASE", "")
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY_BASE is required")
 DEBUG = os.environ.get("CAMPFIRE_DEBUG") == "1"
-FORCE_SSL = os.environ.get("FORCE_SSL") == "1"
+FORCE_SSL = os.environ.get("FORCE_SSL", "").lower() in ("1", "true")
 RESPONSE_CACHE_BYTES = (
     max(0, int(os.environ.get("CAMPFIRE_RESPONSE_CACHE_MB", "64"))) * 1024 * 1024
 )
@@ -14,7 +14,7 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
 ROOT_URLCONF = "campfire.urls"
 INSTALLED_APPS = ["campfire"]
 MIDDLEWARE = [
-    "django.middleware.gzip.GZipMiddleware",
+    "campfire.compression.CompressionMiddleware",
     "campfire.middleware.SessionMiddleware",
     "campfire.middleware.SecurityMiddleware",
 ]

@@ -93,6 +93,16 @@ def attach_signed(token, record_type, record_id, name):
     return blob
 
 
+def upload_owner(blob):
+    try:
+        metadata = json.loads(blob.metadata or "{}")
+    except (ValueError, TypeError):
+        return None
+    return (
+        metadata.get("campfire_upload_user_id") if isinstance(metadata, dict) else None
+    )
+
+
 def direct_upload(request):
     if not request.current_user:
         return HttpResponse(status=401)
@@ -162,11 +172,7 @@ def disk(request, token):
             if request.current_session is None:
                 return HttpResponse(status=401)
             blob = Blob.objects.filter(key=data["key"]).first()
-            owner = (
-                json.loads(blob.metadata or "{}").get("campfire_upload_user_id")
-                if blob
-                else None
-            )
+            owner = upload_owner(blob) if blob else None
             if blob is None or (owner is not None and owner != request.current_user.id):
                 return HttpResponse(status=403)
             raw = request.body
@@ -201,7 +207,7 @@ def blob_redirect(request, token, filename):
     allowed = False
     if not attachments.exists():
         # Preserve existing Rails draft signed URLs; native drafts record their uploader.
-        owner = json.loads(blob.metadata or "{}").get("campfire_upload_user_id")
+        owner = upload_owner(blob)
         allowed = owner is None or owner == request.current_user.id
     for a in attachments:
         if a.record_type == "Message":
