@@ -50,11 +50,20 @@ def rate_limit(key, count, seconds):
 
 
 def enqueue(kind, data):
-    with connect() as db:
-        db.execute(
-            "INSERT INTO jobs(payload,available_at) VALUES (?,?)",
-            [json.dumps({"kind": kind, "data": data}), time.time()],
-        )
+    enqueue_many([(kind, data)])
+
+
+def enqueue_many(jobs):
+    available_at = time.time()
+    rows = [
+        (json.dumps({"kind": kind, "data": data}), available_at) for kind, data in jobs
+    ]
+    if not rows:
+        return
+    # Retain individual leased/retried jobs, with one durable queue transaction.
+    with connect() as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        db.executemany("INSERT INTO jobs(payload,available_at) VALUES (?,?)", rows)
 
 
 def claim():

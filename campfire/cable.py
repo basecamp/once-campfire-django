@@ -31,14 +31,30 @@ def redis_client():
 
 
 def publish(stream, value):
-    payload = json.dumps(
-        {"stream": stream, "message": value}, ensure_ascii=False, separators=(",", ":")
-    )
+    publish_many([(stream, value)])
+
+
+def publish_many(publications):
+    payloads = [
+        json.dumps(
+            {"stream": stream, "message": value},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        for stream, value in publications
+    ]
+    if not payloads:
+        return
     client = redis_client()
     if client:
-        client.publish("campfire:cable", payload)
+        # Send ordered individual publications in one Redis round trip.
+        with client.pipeline(transaction=False) as pipeline:
+            for payload in payloads:
+                pipeline.publish("campfire:cable", payload)
+            pipeline.execute()
     elif _loop:
-        _loop.call_soon_threadsafe(deliver, payload)
+        for payload in payloads:
+            _loop.call_soon_threadsafe(deliver, payload)
 
 
 def deliver(payload):

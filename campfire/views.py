@@ -449,7 +449,9 @@ def messages(request, room_id=None, id=None, edit=False, bot_key=None):
             )
         if wants_json:
             return JsonResponse(serialize_message(m, request), status=201)
-        fragment = render_text("message", message_data([m])[0])
+        fragment = getattr(m, "_created_fragment", None)
+        if fragment is None:
+            fragment = render_text("message", message_data([m])[0])
         return HttpResponse(
             f'<turbo-stream action="append" target="messages_rooms_{obj.type.split("::")[-1].lower()}_{obj.id}"><template>{fragment}</template></turbo-stream>',
             content_type="text/vnd.turbo-stream.html",

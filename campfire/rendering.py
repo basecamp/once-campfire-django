@@ -265,38 +265,41 @@ def page(request, name, **kwargs):
     return HttpResponse(body)
 
 
-def message_data(messages, origin=""):
+def message_data(messages, origin="", *, bodies=None, attachments=None, boosts=None):
     messages = list(messages)
     ids = [m.id for m in messages]
-    bodies = {
-        r.record_id: r.body or ""
-        for r in RichText.objects.filter(
-            record_type="Message", name="body", record_id__in=ids
-        )
-    }
-    attachments = {
-        a.record_id: a.blob
-        for a in Attachment.objects.filter(
-            record_type="Message", name="attachment", record_id__in=ids
-        ).select_related("blob")
-    }
-    boosts = {}
-    for b in (
-        Boost.objects.filter(message_id__in=ids)
-        .select_related("booster")
-        .order_by("created_at")
-    ):
-        boosts.setdefault(b.message_id, []).append(
-            Data(
-                ID=b.id,
-                MessageID=b.message_id,
-                BoosterID=b.booster_id,
-                Booster=b.booster.name,
-                BoosterTitle=b.booster.title,
-                BoosterUpdatedAt=b.booster.updated_at,
-                Content=b.content,
+    if bodies is None:
+        bodies = {
+            r.record_id: r.body or ""
+            for r in RichText.objects.filter(
+                record_type="Message", name="body", record_id__in=ids
             )
-        )
+        }
+    if attachments is None:
+        attachments = {
+            a.record_id: a.blob
+            for a in Attachment.objects.filter(
+                record_type="Message", name="attachment", record_id__in=ids
+            ).select_related("blob")
+        }
+    if boosts is None:
+        boosts = {}
+        for b in (
+            Boost.objects.filter(message_id__in=ids)
+            .select_related("booster")
+            .order_by("created_at")
+        ):
+            boosts.setdefault(b.message_id, []).append(
+                Data(
+                    ID=b.id,
+                    MessageID=b.message_id,
+                    BoosterID=b.booster_id,
+                    Booster=b.booster.name,
+                    BoosterTitle=b.booster.title,
+                    BoosterUpdatedAt=b.booster.updated_at,
+                    Content=b.content,
+                )
+            )
     from .media import VARIABLE_TYPES, representation_url
     from .richtext import plain_text, render_body
     from .storage import blob_url
