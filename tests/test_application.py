@@ -252,9 +252,9 @@ class ApplicationTests(unittest.TestCase):
 
     def test_live_message_append_uses_messages_controller_scrolling(self):
         message = create_message(self.admin, self.room, "live scroll regression")
-        with patch("campfire.cable.publish") as publish:
+        with patch("campfire.cable.publish_many") as publish:
             publish_message(message, "append")
-        rendered = publish.call_args_list[0].args[1]
+        rendered = publish.call_args_list[0].args[0][0][1]
         self.assertIn('action="append"', rendered)
         self.assertIn("live scroll regression", rendered)
         self.assertNotIn("maintain_scroll", rendered)
@@ -360,6 +360,215 @@ class ApplicationTests(unittest.TestCase):
         self.assertIn(
             f'name="current-user-id" content="{self.admin.id}"'.encode(), sidebar
         )
+
+    def test_empty_batches_and_no_notification_recipients_do_no_io(self):
+        from campfire.cable import publish_many
+        from campfire.domain import enqueue_notifications
+
+        with (
+            patch("campfire.cable.redis_client") as redis,
+            patch("campfire.jobs.connect") as connect,
+        ):
+            publish_many([])
+            jobs.enqueue_many([])
+            Membership.objects.filter(room=self.room).update(involvement="nothing")
+            message = Message.objects.create(
+                room=self.room, creator=self.admin, client_message_id="no-recipients"
+            )
+            enqueue_notifications(message, "ordinary body")
+        redis.assert_not_called()
+        connect.assert_not_called()
+
+    def test_cable_batch_preserves_every_stream_and_message_in_order(self):
+        from campfire.cable import publish_many
+        from unittest.mock import MagicMock
+
+        client = MagicMock()
+        pipeline = client.pipeline.return_value.__enter__.return_value
+        publications = [("room", "<b>first</b>"), ("user_2_unreads", {"roomId": 1})]
+        with patch("campfire.cable.redis_client", return_value=client):
+            publish_many(publications)
+        client.pipeline.assert_called_once_with(transaction=False)
+        self.assertEqual(
+            [{"stream": stream, "message": value} for stream, value in publications],
+            [json.loads(call.args[1]) for call in pipeline.publish.call_args_list],
+        )
+        self.assertTrue(
+            all(
+                call.args[0] == "campfire:cable"
+                for call in pipeline.publish.call_args_list
+            )
+        )
+        pipeline.execute.assert_called_once_with()
+
+    def test_notification_batch_keeps_individual_jobs_and_one_queue_commit(self):
+        from campfire.domain import enqueue_notifications
+
+        Membership.objects.filter(room=self.room).update(involvement="everything")
+        message = Message.objects.create(
+            room=self.room, creator=self.admin, client_message_id="queue-batch"
+        )
+        statements = []
+        original = jobs.connect
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def traced():
+            with original() as db:
+                db.set_trace_callback(statements.append)
+                yield db
+
+        with patch("campfire.jobs.connect", side_effect=traced) as connect:
+            enqueue_notifications(message, "plain message")
+        self.assertEqual(1, connect.call_count)
+        self.assertEqual(1, statements.count("COMMIT"))
+        with jobs.connect() as db:
+            payloads = [
+                json.loads(row[0])
+                for row in db.execute("SELECT payload FROM jobs ORDER BY id")
+            ]
+        self.assertEqual(
+            [
+                {"kind": "push", "data": {"user_id": user.id, "message_id": message.id}}
+                for user in (self.member, self.other)
+            ],
+            payloads,
+        )
+
+    def test_queue_batch_failure_rolls_back_all_jobs(self):
+        with jobs.connect() as db:
+            db.execute(
+                "CREATE TRIGGER reject_second_job BEFORE INSERT ON jobs "
+                "WHEN json_extract(NEW.payload, '$.data.number')=2 "
+                "BEGIN SELECT RAISE(ABORT, 'second job rejected'); END"
+            )
+        with self.assertRaises(sqlite3.IntegrityError):
+            jobs.enqueue_many([("test", {"number": 1}), ("test", {"number": 2})])
+        with jobs.connect() as db:
+            self.assertEqual(0, db.execute("SELECT count(*) FROM jobs").fetchone()[0])
+
+    def test_creation_reuses_one_fragment_for_cable_and_http(self):
+        from django.test.utils import CaptureQueriesContext
+        from campfire import rendering
+
+        with (
+            patch("campfire.cable.publish_many") as publish,
+            patch(
+                "campfire.rendering.render_text", wraps=rendering.render_text
+            ) as render,
+            CaptureQueriesContext(connection) as queries,
+        ):
+            response = self.post(
+                f"/rooms/{self.room.id}/messages",
+                {
+                    "message[body]": "fresh <strong>coffee</strong>",
+                    "message[client_message_id]": "one-fragment",
+                },
+            )
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            response.content.decode(), publish.call_args_list[0].args[0][0][1]
+        )
+        self.assertEqual(1, render.call_count)
+        sql = [query["sql"].upper() for query in queries]
+        self.assertFalse(
+            any("DELETE FROM MESSAGE_SEARCH_INDEX" in query for query in sql)
+        )
+        for table in ("ACTION_TEXT_RICH_TEXTS", "ACTIVE_STORAGE_ATTACHMENTS", "BOOSTS"):
+            self.assertFalse(
+                any(query.startswith("SELECT") and table in query for query in sql)
+            )
+        message = Message.objects.get(client_message_id="one-fragment")
+        self.assertIn(f"message_{message.client_message_id}".encode(), response.content)
+        self.assertIn(b"fresh <strong>coffee</strong>", response.content)
+
+    def test_creation_keeps_shared_first_unread_and_direct_latest_unread(self):
+        for kind in ("Rooms::Open", "Rooms::Closed", "Rooms::Direct"):
+            with self.subTest(kind=kind):
+                Room.objects.filter(id=self.room.id).update(type=kind)
+                self.room.refresh_from_db()
+                Membership.objects.filter(room=self.room).update(unread_at=None)
+                first = self.message(body="first")
+                second = self.message(body="second")
+                marker = Membership.objects.get(
+                    user=self.member, room=self.room
+                ).unread_at
+                self.assertEqual(
+                    second.created_at if kind == "Rooms::Direct" else first.created_at,
+                    marker,
+                )
+
+    def test_creation_rechecks_membership_immediately_before_begin(self):
+        def revoke_before_begin(execute, sql, params, many, context):
+            if sql.upper().startswith("BEGIN"):
+                with closing(sqlite3.connect(self.database)) as db:
+                    db.execute(
+                        "DELETE FROM memberships WHERE user_id=? AND room_id=?",
+                        (self.admin.id, self.room.id),
+                    )
+                    db.commit()
+            return execute(sql, params, many, context)
+
+        with (
+            connection.execute_wrapper(revoke_before_begin),
+            patch("campfire.cable.publish_many") as publish,
+        ):
+            response = self.post(
+                f"/rooms/{self.room.id}/messages",
+                {"message[body]": "revoked immediately before BEGIN"},
+            )
+        self.assertEqual(422, response.status_code)
+        self.assertEqual(0, Message.objects.count())
+        self.assertEqual(0, RichText.objects.count())
+        publish.assert_not_called()
+
+    def test_creation_resolves_mention_name_inside_transaction(self):
+        body = (
+            '<p>Hello <action-text-attachment sgid="'
+            + rails.sgid("User", self.member.id)
+            + '"></action-text-attachment></p>'
+        )
+
+        def rename_before_begin(execute, sql, params, many, context):
+            if sql.upper().startswith("BEGIN"):
+                with closing(sqlite3.connect(self.database)) as db:
+                    db.execute(
+                        "UPDATE users SET name='Current mention' WHERE id=?",
+                        (self.member.id,),
+                    )
+                    db.commit()
+            return execute(sql, params, many, context)
+
+        with connection.execute_wrapper(rename_before_begin):
+            message = self.message(body=body)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT body FROM message_search_index WHERE rowid=%s", [message.id]
+            )
+            self.assertEqual("Hello @Current mention", cursor.fetchone()[0])
+        self.assertIn('title="Current mention"', message._created_fragment)
+
+    def test_creation_rolls_back_message_richtext_and_fts_when_unread_fails(self):
+        from django.db import IntegrityError
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "CREATE TRIGGER reject_unread BEFORE UPDATE OF unread_at ON memberships "
+                "BEGIN SELECT RAISE(ABORT, 'unread update rejected'); END"
+            )
+        before = self.room.updated_at
+        with (
+            patch("campfire.cable.publish_many") as publish,
+            self.assertRaises(IntegrityError),
+        ):
+            self.message(body="atomic needle")
+        self.assertEqual(0, Message.objects.count())
+        self.assertEqual(0, RichText.objects.count())
+        self.assertEqual([], search_message_ids(self.admin, "needle"))
+        self.room.refresh_from_db()
+        self.assertEqual(before, self.room.updated_at)
+        publish.assert_not_called()
 
     def test_writes_update_fts_touch_room_and_mark_only_disconnected_members_unread(
         self,
@@ -685,6 +894,8 @@ class ApplicationTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
+        # Known upload objects retain analyze()'s new dimensions in the reused fragment.
+        self.assertIn(b"width: 600.0px; aspect-ratio: 1.6", response.content)
         message = Message.objects.latest("id")
         original = Attachment.objects.get(
             record_type="Message", record_id=message.id

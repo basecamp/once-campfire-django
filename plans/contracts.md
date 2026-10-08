@@ -19,7 +19,7 @@ are not claimed. Raw test and benchmark output remains ignored under `tmp/`.
 | Benchmarks | Independent matched production HTTP runs verify identical ordered message/search windows, successful acknowledged writes, FTS and SQLite integrity. Actual JPEG uploads resize to 1200×675. Two paced runs admit 100 sockets and deliver all 30 messages to every socket; these are measured workloads, not capacity limits. Raw output stays ignored. |
 | Deployment | Native schema preparation and version validation, isolated job SQLite queue, atomic snapshots and checked restore; production Uvicorn multiprocess requires shared Redis; TLS at external proxy |
 
-64 native integration and golden test methods include 19 crypto methods covering independent signed IDs,
+73 native integration and golden test methods include 19 crypto methods covering independent signed IDs,
 app verifiers, encrypted/signed cookies, SGIDs,189 historical CSRF crypto vectors and legacy sessions, plus actual
 SQLite workflows/media/rollback/job recovery/backup/restore. No skipped seed-dependent tests.
 
@@ -45,3 +45,15 @@ matrix, HTTPS token-free login, old cookie continuity, token-free setup/transfer
 owner-authorized uploads. Complete identity/gzip cache bytes preserve literal token-like user
 text, with fresh authorization and foreign-commit invalidation. Uvicorn's configured trusted
 proxy policy supplies the effective scheme; forwarded headers are not trusted in Django itself.
+
+Message creation prepares only pure sanitization and attachment-free plain text before acquiring
+SQLite's writer lock. Membership and signed attachment/mention records remain current inside
+the transaction; message, rich text, FTS, room recency and unread markers commit together.
+Fresh creation skips nonexistent FTS deletes and attachment/boost reloads, then renders one
+post-commit fragment reused for both Cable and the HTTP response. Native controls cover
+membership revocation and mention renaming immediately before BEGIN, unread-trigger rollback,
+shared first-unread versus direct latest-unread markers, and exact Cable/HTTP fragment equality.
+
+Notifications retain individual leased jobs but insert one message's jobs in one atomic queue
+transaction. Cable retains each ordered publication and sends them in one Redis pipeline.
+Native controls check payload order/count, one queue commit and whole-batch rollback.

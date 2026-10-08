@@ -51,6 +51,9 @@ with four hardware cores allocated to each app.
 
 ## Known differences
 
+- Shared rooms preserve the first unread message until the member reads it, matching the
+  updated Rails and Laravel implementations. Direct pings retain their latest-message marker.
+
 - Browser writes use Fetch Metadata instead of CSRF tokens. Unsafe requests reject a mismatched
   or null Origin and require `Sec-Fetch-Site: same-origin` or `same-site`; missing metadata is
   accepted only over plain HTTP without `FORCE_SSL=1` or `true`. GET/HEAD and authenticated bot routes

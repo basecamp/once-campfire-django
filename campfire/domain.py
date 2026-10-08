@@ -97,10 +97,15 @@ def create_user(**attributes):
     return user
 
 
-def index_message(message, body, attachment=None):
-    text = plain_text(body) or (attachment.filename if attachment else "")
+def index_message(message, body, attachment=None, *, fresh=False, text=None):
+    if text is None:
+        text = plain_text(body)
+    text = text or (attachment.filename if attachment else "")
     with connection.cursor() as cursor:
-        cursor.execute("DELETE FROM message_search_index WHERE rowid=%s", [message.id])
+        if not fresh:
+            cursor.execute(
+                "DELETE FROM message_search_index WHERE rowid=%s", [message.id]
+            )
         cursor.execute(
             "INSERT INTO message_search_index(rowid,body) VALUES (%s,%s)",
             [message.id, text],
@@ -112,6 +117,11 @@ def create_message(
 ):
     from .storage import attach_signed, store_upload
 
+    # Pure parsing can run before acquiring SQLite's single writer lock. Mentions
+    # and blobs resolve current records inside the transaction, as in Laravel.
+    body = sanitize(body)
+    has_embeds = "<action-text-attachment" in body.lower()
+    text = None if has_embeds else plain_text(body)
     with staged_files(), transaction.atomic():
         # Membership is rechecked inside the write transaction, including bot writes.
         if not Membership.objects.filter(user=user, room=room).exists():
@@ -120,7 +130,7 @@ def create_message(
             room=room, creator=user, client_message_id=client_id or str(uuid.uuid4())
         )
         rich = RichText.objects.create(
-            record_type="Message", record_id=message.id, body=sanitize(body)
+            record_type="Message", record_id=message.id, body=body
         )
         blob = None
         if attachment:
@@ -133,16 +143,30 @@ def create_message(
             from .media import process_attachment
 
             process_attachment(blob)
-        reconcile_embeds(rich)
-        index_message(message, rich.body, blob)
+        if has_embeds:
+            reconcile_embeds(rich)
+        index_message(message, rich.body, blob, fresh=True, text=text)
         Room.objects.filter(id=room.id).update(updated_at=now())
-        Membership.objects.filter(room=room).exclude(user=user).exclude(
-            involvement="invisible"
-        ).filter(
+        recipients = (
+            Membership.objects.filter(room=room)
+            .exclude(user=user)
+            .exclude(involvement="invisible")
+        )
+        # Rails preserves the first unread shared-room message; pings retain
+        # their existing recency behavior.
+        if room.type != "Rooms::Direct":
+            recipients = recipients.filter(unread_at__isnull=True)
+        recipients.filter(
             Q(connected_at__isnull=True)
             | Q(connected_at__lt=now() - timedelta(seconds=60))
         ).update(unread_at=message.created_at, updated_at=now())
-        transaction.on_commit(lambda: publish_message(message, "append"))
+
+        def publish_created():
+            message._created_fragment = publish_message(
+                message, "append", body=rich.body, attachment=blob
+            )
+
+        transaction.on_commit(publish_created)
         transaction.on_commit(
             lambda: enqueue_notifications(message, rich.body, webhooks=webhooks)
         )
@@ -219,33 +243,49 @@ def delete_message(message):
         transaction.on_commit(lambda: publish_message(message, "remove"))
 
 
-def publish_message(message, action):
-    from .cable import publish
+def publish_message(message, action, *, body=None, attachment=None):
+    from .cable import publish_many
     from .rendering import message_data, render_text
 
     if action == "remove":
         fragment = ""
         target = "message_" + message.client_message_id
     else:
-        message = Message.objects.select_related("creator", "room").get(id=message.id)
-        fragment = render_text("message", message_data([message])[0])
+        if body is None:
+            message = Message.objects.select_related("creator", "room").get(
+                id=message.id
+            )
+            data = message_data([message])[0]
+        else:
+            data = message_data(
+                [message],
+                bodies={message.id: body},
+                attachments={message.id: attachment} if attachment else {},
+                boosts={},
+            )[0]
+        fragment = render_text("message", data)
         target = (
             f"messages_rooms_{message.room.type.split('::')[-1].lower()}_{message.room_id}"
             if action == "append"
             else "message_" + message.client_message_id
         )
     content = f'<turbo-stream action="{action}" target="{target}"><template>{fragment}</template></turbo-stream>'
-    publish(rails.stream(message.room), content)
+    publications = [(rails.stream(message.room), content)]
     if action == "append":
-        for user_id in Membership.objects.filter(room_id=message.room_id).values_list(
-            "user_id", flat=True
-        ):
-            publish(f"user_{user_id}_unreads", {"roomId": message.room_id})
+        publications.extend(
+            (f"user_{user_id}_unreads", {"roomId": message.room_id})
+            for user_id in Membership.objects.filter(
+                room_id=message.room_id
+            ).values_list("user_id", flat=True)
+        )
+    publish_many(publications)
+    return fragment
 
 
 def enqueue_notifications(message, body, *, webhooks=True):
-    from .jobs import enqueue
+    from .jobs import enqueue_many
 
+    pending = []
     mentions = mention_ids(body)
     bot_ids = (
         Membership.objects.filter(room=message.room, user__role=2, user__status=0)
@@ -256,7 +296,9 @@ def enqueue_notifications(message, body, *, webhooks=True):
         bot_ids = [id for id in bot_ids if id in mentions]
     if webhooks:
         for webhook in Webhook.objects.filter(user_id__in=bot_ids):
-            enqueue("webhook", {"webhook_id": webhook.id, "message_id": message.id})
+            pending.append(
+                ("webhook", {"webhook_id": webhook.id, "message_id": message.id})
+            )
     for membership in (
         Membership.objects.filter(room=message.room, user__status=0)
         .exclude(user=message.creator)
@@ -270,7 +312,10 @@ def enqueue_notifications(message, body, *, webhooks=True):
             or membership.involvement == "mentions"
             and membership.user_id in mentions
         ):
-            enqueue("push", {"user_id": membership.user_id, "message_id": message.id})
+            pending.append(
+                ("push", {"user_id": membership.user_id, "message_id": message.id})
+            )
+    enqueue_many(pending)
 
 
 def delete_room(room):
