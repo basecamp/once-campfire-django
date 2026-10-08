@@ -31,7 +31,8 @@ class SessionMiddleware:
         if not isinstance(request.session_data, dict):
             request.session_data = {}
         request.session_original = request.session_data.copy()
-        request.session_data.setdefault("session_id", secrets.token_hex(16))
+        if "session_id" not in request.session_data:
+            request.session_data["session_id"] = secrets.token_hex(16)
         request.current_user = request.current_session = None
         raw = request.COOKIES.get("session_token")
         if raw:

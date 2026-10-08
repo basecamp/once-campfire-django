@@ -19,7 +19,7 @@ are not claimed. Raw test and benchmark output remains ignored under `tmp/`.
 | Benchmarks | Independent matched production HTTP runs verify identical ordered message/search windows, successful acknowledged writes, FTS and SQLite integrity. Actual JPEG uploads resize to 1200×675. Two paced runs admit 100 sockets and deliver all 30 messages to every socket; these are measured workloads, not capacity limits. Raw output stays ignored. |
 | Deployment | Native schema preparation and version validation, isolated job SQLite queue, atomic snapshots and checked restore; production Uvicorn multiprocess requires shared Redis; TLS at external proxy |
 
-73 native integration and golden test methods include 19 crypto methods covering independent signed IDs,
+75 native integration and golden test methods include 19 crypto methods covering independent signed IDs,
 app verifiers, encrypted/signed cookies, SGIDs,189 historical CSRF crypto vectors and legacy sessions, plus actual
 SQLite workflows/media/rollback/job recovery/backup/restore. No skipped seed-dependent tests.
 
@@ -57,3 +57,6 @@ shared first-unread versus direct latest-unread markers, and exact Cable/HTTP fr
 Notifications retain individual leased jobs but insert one message's jobs in one atomic queue
 transaction. Cable retains each ordered publication and sends them in one Redis pipeline.
 Native controls check payload order/count, one queue commit and whole-batch rollback.
+
+Session IDs draw fresh randomness only when absent from the incoming encrypted cookie. Native
+controls verify exact cookie continuity and one-time IDs for retained legacy cookie fields.

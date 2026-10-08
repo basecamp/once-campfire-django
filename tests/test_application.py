@@ -361,6 +361,40 @@ class ApplicationTests(unittest.TestCase):
             f'name="current-user-id" content="{self.admin.id}"'.encode(), sidebar
         )
 
+    def test_existing_session_id_reuses_cookie_without_unused_random_generation(self):
+        cookie = self.client.cookies["_campfire_session"].value
+        original = rails.decrypt_cookie("_campfire_session", cookie)
+        self.assertIn("session_id", original)
+        with patch("campfire.middleware.secrets.token_hex") as random:
+            response = self.client.get("/up")
+        random.assert_not_called()
+        self.assertEqual(200, response.status_code)
+        self.assertNotIn("_campfire_session", response.cookies)
+        self.assertEqual(cookie, self.client.cookies["_campfire_session"].value)
+        self.assertEqual(original, rails.decrypt_cookie("_campfire_session", cookie))
+
+    def test_missing_session_id_is_generated_once_and_preserves_old_cookie_fields(self):
+        client = Client()
+        client.cookies["_campfire_session"] = rails.encrypt_cookie(
+            "_campfire_session", {"return_to_after_authenticating": "/users"}
+        )
+        with patch(
+            "campfire.middleware.secrets.token_hex", return_value="a" * 32
+        ) as random:
+            response = client.get("/up")
+            cookie = client.cookies["_campfire_session"].value
+            again = client.get("/up")
+        random.assert_called_once_with(16)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(200, again.status_code)
+        self.assertIn("_campfire_session", response.cookies)
+        self.assertNotIn("_campfire_session", again.cookies)
+        self.assertEqual(
+            {"session_id": "a" * 32, "return_to_after_authenticating": "/users"},
+            rails.decrypt_cookie("_campfire_session", cookie),
+        )
+        self.assertEqual(cookie, client.cookies["_campfire_session"].value)
+
     def test_empty_batches_and_no_notification_recipients_do_no_io(self):
         from campfire.cable import publish_many
         from campfire.domain import enqueue_notifications
